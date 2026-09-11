@@ -1,0 +1,137 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Daily at 05:23 UTC.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream/main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      UPSTREAM_REPO: https://github.com/Emanuele-web04/synara.git
+      SYNC_BRANCH: sync/upstream
+      # GITHUB_TOKEN works, but pushes/PRs it creates don't trigger CI runs.
+      # Add a fine-grained PAT as SYNC_PAT (contents+PRs on this repo) to get
+      # checks on the sync PR.
+      GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_REPO" || git remote set-url upstream "$UPSTREAM_REPO"
+          # Upstream release tags share our vX.Y.Z numbering; never pull them.
+          git fetch --no-tags upstream main
+
+      - name: Check for new upstream commits
+        id: status
+        run: |
+          behind="$(git rev-list --count HEAD..upstream/main)"
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "main is $behind commit(s) behind upstream/main."
+
+      - name: Setup Bun
+        if: steps.status.outputs.behind != '0'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Build sync branch
+        if: steps.status.outputs.behind != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$SYNC_BRANCH" HEAD
+
+          if git merge upstream/main -m "merge: upstream/main"; then
+            echo "Clean merge."
+            exit 0
+          fi
+
+          version_files=(
+            apps/desktop/package.json
+            apps/server/package.json
+            apps/web/package.json
+            packages/contracts/package.json
+          )
+          allowed="$(printf '%s\n' "${version_files[@]}" bun.lock | sort)"
+          conflicts="$(git diff --name-only --diff-filter=U | sort)"
+          extra="$(comm -23 <(printf '%s\n' "$conflicts") <(printf '%s\n' "$allowed"))"
+          if [[ -n "$extra" ]]; then
+            git merge --abort
+            echo "Upstream merge conflicts outside the version files — manual merge needed:" >&2
+            echo "$extra" >&2
+            exit 1
+          fi
+
+          # Version files conflict on every upstream release. Keep whichever side
+          # carries the higher semver so this repo never regresses its version.
+          for file in "${version_files[@]}"; do
+            if ! grep -Fxq "$file" <<< "$conflicts"; then
+              continue
+            fi
+            ours="$(git show ":2:$file" | node -pe 'JSON.parse(require("fs").readFileSync(0)).version')"
+            theirs="$(git show ":3:$file" | node -pe 'JSON.parse(require("fs").readFileSync(0)).version')"
+            winner="$(printf '%s\n%s\n' "$ours" "$theirs" | sort -V | tail -n1)"
+            if [[ "$winner" == "$ours" ]]; then
+              git checkout --ours "$file"
+            else
+              git checkout --theirs "$file"
+            fi
+            git add "$file"
+            echo "$file: ours=$ours theirs=$theirs -> kept $winner"
+          done
+
+          if grep -Fxq "bun.lock" <<< "$conflicts"; then
+            git checkout --theirs bun.lock
+            bun install --lockfile-only --ignore-scripts
+            git add bun.lock
+          fi
+
+          git commit --no-edit
+          echo "Merged with auto-resolved version files."
+
+      - name: Push sync branch
+        if: steps.status.outputs.behind != '0'
+        run: git push origin "$SYNC_BRANCH" --force-with-lease
+
+      - name: Create or update pull request
+        if: steps.status.outputs.behind != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          behind="${{ steps.status.outputs.behind }}"
+          upstream_head="$(git rev-parse --short upstream/main)"
+          body=$'Automated merge of `upstream/main` (Emanuele-web04/synara) into `main`.\n\n**Merge this PR with a merge commit — do NOT squash.** Squashing drops the merge base, so the next upstream sync re-evaluates every diverged commit and produces repeated conflicts.\n\nVersion-file conflicts, if any, were auto-resolved to the higher semver; `bun.lock` was regenerated to match.'
+
+          existing="$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number')"
+          if [[ -n "$existing" ]]; then
+            gh pr comment "$existing" --body "Updated with upstream/main @ ${upstream_head} (${behind} commits ahead of main)."
+            echo "Updated existing PR #$existing."
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$SYNC_BRANCH" \
+            --title "chore: sync upstream/main (${upstream_head})" \
+            --body "$body"
