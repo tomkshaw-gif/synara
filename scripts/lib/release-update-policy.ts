@@ -8,10 +8,15 @@ import { resolve } from "node:path";
 
 export type ReleaseLane = "bridge" | "clean";
 
+export const RELEASE_PLATFORMS = ["mac", "windows", "linux"] as const;
+export type ReleasePlatform = (typeof RELEASE_PLATFORMS)[number];
+
 export interface ReleaseUpdatePolicyConfig {
   readonly lane: ReleaseLane;
   readonly bridgeVersion: string;
   readonly channel: string;
+  readonly platforms?: readonly ReleasePlatform[];
+  readonly allowUnsignedWindowsPublication?: boolean;
 }
 
 export interface ResolvedReleaseUpdatePolicy {
@@ -23,6 +28,7 @@ export interface ResolvedReleaseUpdatePolicy {
   readonly lane: ReleaseLane;
   readonly bridgeTag: string;
   readonly channel: string;
+  readonly allowUnsignedWindowsPublication: boolean;
 }
 
 const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
@@ -64,6 +70,27 @@ export function validateReleaseUpdatePolicyConfig(config: unknown): ReleaseUpdat
   ) {
     throw new Error(`Invalid dedicated update channel: ${String(candidate.channel)}`);
   }
+  if (candidate.platforms !== undefined) {
+    if (!Array.isArray(candidate.platforms) || candidate.platforms.length === 0) {
+      throw new Error("Release platforms must be a non-empty array.");
+    }
+    const seen = new Set<string>();
+    for (const platform of candidate.platforms) {
+      if (!RELEASE_PLATFORMS.includes(platform as ReleasePlatform)) {
+        throw new Error(`Invalid release platform: ${String(platform)}`);
+      }
+      if (seen.has(platform)) {
+        throw new Error(`Duplicate release platform: ${platform}`);
+      }
+      seen.add(platform);
+    }
+  }
+  if (
+    candidate.allowUnsignedWindowsPublication !== undefined &&
+    typeof candidate.allowUnsignedWindowsPublication !== "boolean"
+  ) {
+    throw new Error("allowUnsignedWindowsPublication must be a boolean.");
+  }
   return candidate as ReleaseUpdatePolicyConfig;
 }
 
@@ -101,14 +128,39 @@ export function resolveReleaseUpdatePolicy(
     lane: normalizedConfig.lane,
     bridgeTag: `v${normalizedConfig.bridgeVersion}`,
     channel: normalizedConfig.channel,
+    allowUnsignedWindowsPublication: normalizedConfig.allowUnsignedWindowsPublication === true,
   };
 }
 
-export function channelManifestNames(channel: string): readonly string[] {
+interface ManifestMapping {
+  readonly platform: ReleasePlatform;
+  readonly sourceName: string;
+  readonly channelSuffix: string;
+}
+
+const MANIFEST_MAPPINGS: readonly ManifestMapping[] = [
+  { platform: "mac", sourceName: "latest-mac.yml", channelSuffix: "-mac" },
+  { platform: "windows", sourceName: "latest.yml", channelSuffix: "" },
+  { platform: "linux", sourceName: "latest-linux.yml", channelSuffix: "-linux" },
+];
+
+function manifestMappingsForPlatforms(
+  platforms: readonly ReleasePlatform[] | undefined,
+): readonly ManifestMapping[] {
+  const active = platforms ?? RELEASE_PLATFORMS;
+  return MANIFEST_MAPPINGS.filter((mapping) => active.includes(mapping.platform));
+}
+
+export function channelManifestNames(
+  channel: string,
+  platforms?: readonly ReleasePlatform[],
+): readonly string[] {
   if (!CHANNEL_PATTERN.test(channel) || channel === "latest") {
     throw new Error(`Invalid dedicated update channel: ${channel}`);
   }
-  return [`${channel}-mac.yml`, `${channel}.yml`, `${channel}-linux.yml`];
+  return manifestMappingsForPlatforms(platforms).map(
+    (mapping) => `${channel}${mapping.channelSuffix}.yml`,
+  );
 }
 
 function copyChannelManifests(
@@ -136,20 +188,16 @@ export function prepareReleaseUpdateManifests(
   config: ReleaseUpdatePolicyConfig,
 ): readonly string[] {
   const normalizedConfig = validateReleaseUpdatePolicyConfig(config);
-  const sourceNames = ["latest-mac.yml", "latest.yml", "latest-linux.yml"] as const;
-  const destinationNames = channelManifestNames(normalizedConfig.channel);
-  if (normalizedConfig.lane === "bridge") {
-    const missing = sourceNames.filter((name) => !existsSync(resolve(assetDirectory, name)));
-    if (missing.length > 0) {
-      throw new Error(`Compatibility release is missing update manifests: ${missing.join(", ")}`);
-    }
-    copyChannelManifests(assetDirectory, sourceNames, destinationNames);
-    return [...sourceNames, ...destinationNames];
-  }
-
+  const mappings = manifestMappingsForPlatforms(normalizedConfig.platforms);
+  const sourceNames = mappings.map((mapping) => mapping.sourceName);
+  const destinationNames = channelManifestNames(
+    normalizedConfig.channel,
+    normalizedConfig.platforms,
+  );
   const missing = sourceNames.filter((name) => !existsSync(resolve(assetDirectory, name)));
   if (missing.length > 0) {
-    throw new Error(`Latest release is missing update manifests: ${missing.join(", ")}`);
+    const label = normalizedConfig.lane === "bridge" ? "Compatibility" : "Latest";
+    throw new Error(`${label} release is missing update manifests: ${missing.join(", ")}`);
   }
   // Stable 0.5.x releases are GitHub Latest, but shipped desktop binaries still
   // request the dedicated `synara` channel. Keep both filenames in the same

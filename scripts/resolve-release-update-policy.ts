@@ -25,6 +25,7 @@ const output = {
   release_lane: policy.lane,
   bridge_tag: policy.bridgeTag,
   update_channel: policy.channel,
+  allow_unsigned_windows: String(policy.allowUnsignedWindowsPublication),
 };
 
 const githubOutput = process.env.GITHUB_OUTPUT;
