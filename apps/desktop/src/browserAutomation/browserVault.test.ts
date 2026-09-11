@@ -73,6 +73,9 @@ describe("browser vault", () => {
         restored?.dispose();
       }
     },
+    // Vault key derivation is deliberately slow; the release preflight runner
+    // needs more than the 5s default.
+    30_000,
   );
 
   it("does not enable saving or agent access after a failed settings write", async () => {
@@ -163,7 +166,9 @@ describe("browser vault", () => {
     await expect(adapter.handleRequest("list", {}, origin)).rejects.toThrow();
     expect((await vault.snapshot()).logins).toEqual([]);
     vault.dispose();
-  });
+    // Vault key derivation is deliberately slow; the release preflight runner
+    // needs more than the 5s default.
+  }, 30_000);
 
   it("scopes account metadata to the exact origin and honors disabling and cancellation", async () => {
     const { vault } = await fixture();
