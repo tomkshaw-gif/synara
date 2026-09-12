@@ -309,23 +309,31 @@ export function useChatTranscriptScroll({
             };
       clearTranscriptAutoFollow(true);
       pendingScrollGestureRef.current = origin;
-      // Native scrolling can settle on the next rendering pass. Keep one
-      // pending check per gesture burst, preserving ownership from its first event.
-      pendingScrollGestureFrameRef.current = window.requestAnimationFrame(() => {
-        pendingScrollGestureFrameRef.current = window.requestAnimationFrame(() => {
-          pendingScrollGestureFrameRef.current = null;
-          pendingScrollGestureRef.current = null;
-          if (origin.wasFollowing && container.scrollTop >= origin.scrollTop) {
-            // A nested or no-op wheel must not strand follow, even if new text
-            // increased the distance from the bottom while the gesture settled.
-            setTranscriptScrollDetached(false);
-            onIsAtEndChange(true);
-            scrollToEnd();
-          } else {
-            releaseTranscriptScrollGesture();
-          }
-        });
-      });
+      // Native scrolling can lag the gesture event by several frames on a busy
+      // machine. Keep sampling for real upward movement across a bounded window
+      // before classifying the gesture as a no-op, so a slow compositor cannot
+      // eat a genuine scroll-up and snap the reader back to the bottom.
+      const settleDeadline = performance.now() + 300;
+      const check = () => {
+        pendingScrollGestureFrameRef.current = null;
+        if (pendingScrollGestureRef.current !== origin) return;
+        const movedUp = container.scrollTop < origin.scrollTop - 1;
+        if (upward && !movedUp && performance.now() < settleDeadline) {
+          pendingScrollGestureFrameRef.current = window.requestAnimationFrame(check);
+          return;
+        }
+        pendingScrollGestureRef.current = null;
+        if (origin.wasFollowing && container.scrollTop >= origin.scrollTop) {
+          // A nested or no-op wheel must not strand follow, even if new text
+          // increased the distance from the bottom while the gesture settled.
+          setTranscriptScrollDetached(false);
+          onIsAtEndChange(true);
+          scrollToEnd();
+        } else {
+          releaseTranscriptScrollGesture();
+        }
+      };
+      pendingScrollGestureFrameRef.current = window.requestAnimationFrame(check);
     },
     [
       legendListRef,
@@ -393,12 +401,17 @@ export function useChatTranscriptScroll({
       if (previousFrame !== null) window.cancelAnimationFrame(previousFrame);
       // Native key scrolling may begin after keyup. Give it rendering time to
       // move, then recover a no-op/nested gesture instead of holding indefinitely.
-      const deadline = performance.now() + 150;
+      // Require a few sampled frames as well as the wall-clock window: on a busy
+      // machine the first frame can arrive past the deadline, and a single late
+      // sample must not eat a real PageUp/Home scroll.
+      const deadline = performance.now() + 300;
+      let framesSampled = 0;
       const check = () => {
         pendingScrollGestureFrameRef.current = null;
         if (pendingScrollGestureRef.current !== origin) return;
         const movedUp = origin.container.scrollTop < origin.scrollTop - 1;
-        if (!movedUp && performance.now() < deadline) {
+        framesSampled += 1;
+        if (!movedUp && (framesSampled < 3 || performance.now() < deadline)) {
           pendingScrollGestureFrameRef.current = window.requestAnimationFrame(check);
           return;
         }

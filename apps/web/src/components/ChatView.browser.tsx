@@ -3771,6 +3771,10 @@ describe("ChatView transcript geometry (full app)", () => {
     }
   });
 
+  // Scroll-position assertions poll real layout on a shared runner; the
+  // vi.waitFor default (1s) is routinely starved by LegendList settle +
+  // native gesture latency. Match waitForElement's budget as a backstop.
+  const FOLLOW_ASSERT_TIMEOUT = { timeout: 8_000, interval: 16 } as const;
   it.each([
     "wheel near end",
     "manual return",
@@ -3832,8 +3836,9 @@ describe("ChatView transcript geometry (full app)", () => {
         () => document.querySelector<HTMLElement>("[data-chat-scroll-container='true']"),
         "Transcript did not mount.",
       );
-      await vi.waitFor(() =>
-        expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+      await vi.waitFor(
+        () => expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+        FOLLOW_ASSERT_TIMEOUT,
       );
       await new Promise<void>((resolve) => setTimeout(resolve, 350));
       if (action === "send") {
@@ -3904,8 +3909,9 @@ describe("ChatView transcript geometry (full app)", () => {
         grow();
         await waitForLayout();
       }
-      await vi.waitFor(() =>
-        expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+      await vi.waitFor(
+        () => expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+        FOLLOW_ASSERT_TIMEOUT,
       );
 
       if (action === "wheel down") {
@@ -3913,7 +3919,10 @@ describe("ChatView transcript geometry (full app)", () => {
       } else if (action === "layout leave") {
         const height = container.clientHeight;
         container.style.maxHeight = `${height - 180}px`;
-        await vi.waitFor(() => expect(container.clientHeight).toBeLessThan(height));
+        await vi.waitFor(
+          () => expect(container.clientHeight).toBeLessThan(height),
+          FOLLOW_ASSERT_TIMEOUT,
+        );
         await waitForLayout();
         await userEvent.wheel(container, { delta: { y: 100 } });
       } else if (action === "wheel without movement") {
@@ -3936,10 +3945,11 @@ describe("ChatView transcript geometry (full app)", () => {
           } else {
             await userEvent.wheel(nested, { delta: { y: -30 } });
           }
-          await vi.waitFor(() => expect(nested.scrollTop).toBeLessThan(100));
+          await vi.waitFor(() => expect(nested.scrollTop).toBeLessThan(100), FOLLOW_ASSERT_TIMEOUT);
           await waitForLayout();
-          await vi.waitFor(() =>
-            expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+          await vi.waitFor(
+            () => expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+            FOLLOW_ASSERT_TIMEOUT,
           );
         } finally {
           nested.remove();
@@ -3954,7 +3964,10 @@ describe("ChatView transcript geometry (full app)", () => {
           expect(document.activeElement).toBe(container);
           const initialTop = container.scrollTop;
           await userEvent.keyboard(`{${keyboardKey}}`);
-          await vi.waitFor(() => expect(container.scrollTop).toBeLessThan(initialTop - 1));
+          await vi.waitFor(
+            () => expect(container.scrollTop).toBeLessThan(initialTop - 1),
+            FOLLOW_ASSERT_TIMEOUT,
+          );
           // A cancelled list jump can emit scrollend before native key scrolling
           // finishes. Wait for an actual quiet viewport before recording its text.
           let lastTop = container.scrollTop;
@@ -3967,7 +3980,7 @@ describe("ChatView transcript geometry (full app)", () => {
               }
               expect(performance.now() - stableSince).toBeGreaterThanOrEqual(150);
             },
-            { timeout: 3_000, interval: 20 },
+            { timeout: 8_000, interval: 20 },
           );
         } else if (action === "find") {
           await dispatchConfiguredShortcutWhenReady(window, { key: "f" });
@@ -3979,15 +3992,16 @@ describe("ChatView transcript geometry (full app)", () => {
             const viewport = container.getBoundingClientRect();
             expect(bounds.top).toBeGreaterThanOrEqual(viewport.top);
             expect(bounds.bottom).toBeLessThanOrEqual(viewport.bottom);
-          });
+          }, FOLLOW_ASSERT_TIMEOUT);
           await new Promise<void>((resolve) => setTimeout(resolve, 350));
         } else {
           await userEvent.wheel(container, {
             delta: { y: action === "wheel near end" ? -12 : -350 },
           });
         }
-        await vi.waitFor(() =>
-          expect(getScrollContainerDistanceFromBottom(container)).toBeGreaterThanOrEqual(10),
+        await vi.waitFor(
+          () => expect(getScrollContainerDistanceFromBottom(container)).toBeGreaterThanOrEqual(10),
+          FOLLOW_ASSERT_TIMEOUT,
         );
         await waitForLayout();
         const viewport = container.getBoundingClientRect();
@@ -4065,7 +4079,7 @@ describe("ChatView transcript geometry (full app)", () => {
             expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(
               action === "thread switch" ? AUTO_SCROLL_BOTTOM_THRESHOLD_PX : 4,
             ),
-          { timeout: 3_000 },
+          FOLLOW_ASSERT_TIMEOUT,
         );
         await new Promise<void>((resolve) => setTimeout(resolve, 250));
       }
@@ -4073,8 +4087,9 @@ describe("ChatView transcript geometry (full app)", () => {
         grow();
         await waitForLayout();
       }
-      await vi.waitFor(() =>
-        expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+      await vi.waitFor(
+        () => expect(getScrollContainerDistanceFromBottom(container)).toBeLessThanOrEqual(4),
+        FOLLOW_ASSERT_TIMEOUT,
       );
     } finally {
       await mounted.cleanup();
