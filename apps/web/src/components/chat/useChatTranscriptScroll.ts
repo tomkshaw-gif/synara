@@ -83,6 +83,7 @@ export function useChatTranscriptScroll({
     scrollTop: number;
     wasFollowing: boolean;
     keyboard?: boolean;
+    upward?: boolean;
   } | null>(null);
   const pendingScrollGestureFrameRef = useRef<number | null>(null);
   const cancelPendingScrollGesture = useCallback(() => {
@@ -172,8 +173,9 @@ export function useChatTranscriptScroll({
     (isAtEnd: boolean) => {
       const container = legendListRef.current?.getScrollableNode();
       const pending = pendingScrollGestureRef.current;
-      if (pending?.keyboard && container === pending.container) {
-        // Native key scrolling can begin after keyup and after multiple frames.
+      if ((pending?.keyboard || pending?.upward) && container === pending.container) {
+        // A list measurement can still report the old end before native wheel
+        // or key scrolling starts. Only observed movement may release ownership.
         if (container.scrollTop >= pending.scrollTop || isScrollContainerNearBottom(container, 1))
           return;
         pendingScrollGestureRef.current = null;
@@ -302,6 +304,7 @@ export function useChatTranscriptScroll({
           : {
               container,
               scrollTop: container.scrollTop,
+              upward,
               wasFollowing:
                 isAtEndRef.current &&
                 !isUserScrollDetachedRef.current &&
@@ -314,11 +317,13 @@ export function useChatTranscriptScroll({
       // before classifying the gesture as a no-op, so a slow compositor cannot
       // eat a genuine scroll-up and snap the reader back to the bottom.
       const settleDeadline = performance.now() + 300;
+      let framesSampled = 0;
       const check = () => {
         pendingScrollGestureFrameRef.current = null;
         if (pendingScrollGestureRef.current !== origin) return;
         const movedUp = container.scrollTop < origin.scrollTop - 1;
-        if (upward && !movedUp && performance.now() < settleDeadline) {
+        framesSampled += 1;
+        if (upward && !movedUp && (framesSampled < 3 || performance.now() < settleDeadline)) {
           pendingScrollGestureFrameRef.current = window.requestAnimationFrame(check);
           return;
         }

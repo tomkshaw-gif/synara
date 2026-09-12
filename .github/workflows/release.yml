@@ -26,9 +26,10 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 50
     permissions:
       contents: read
+      actions: read
     outputs:
       version: ${{ steps.release_meta.outputs.version }}
       tag: ${{ steps.release_meta.outputs.tag }}
@@ -90,6 +91,12 @@ jobs:
             "$SOURCE_REF_TYPE" \
             "$SOURCE_REF_NAME"
 
+      - name: Require successful CI for the release commit
+        if: steps.release_mode.outputs.publish_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release-ci.ts "${{ steps.source_provenance.outputs.source_commit }}"
+
       - name: Verify public updater repository
         env:
           GH_TOKEN: ${{ github.token }}
@@ -135,23 +142,29 @@ jobs:
           done
 
       - name: Setup Bun
+        if: steps.release_mode.outputs.publish_release != 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
 
       - name: Install dependencies
+        if: steps.release_mode.outputs.publish_release != 'true'
         run: bun install --frozen-lockfile
 
       - name: Verify Synara identity
+        if: steps.release_mode.outputs.publish_release != 'true'
         run: bun run brand:check
 
       - name: Lint
+        if: steps.release_mode.outputs.publish_release != 'true'
         run: bun run lint
 
       - name: Typecheck
+        if: steps.release_mode.outputs.publish_release != 'true'
         run: bun run typecheck
 
       - name: Test
+        if: steps.release_mode.outputs.publish_release != 'true'
         run: bun run test
 
   build:
