@@ -32,3 +32,7 @@ Auto is only offered for providers with a native AI-review implementation.
 Codex Auto requires CLI `0.131.0-alpha.9` or newer.
 Claude Code Auto requires CLI `2.1.83` or newer and a model/account where the
 SDK reports Auto support.
+
+Session approval choices do not change the saved runtime mode. After an idle stop
+or restart, the selected Supervised/Auto/Full access policy still applies. Use the
+access-mode picker explicitly when a durable policy change is intended.

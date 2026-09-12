@@ -1302,7 +1302,6 @@ export default function ChatView({
   } = useChatPendingInteractions({
     threadId,
     activeThread,
-    runtimeMode,
     promptRef,
     setPrompt,
     setComposerCursor,

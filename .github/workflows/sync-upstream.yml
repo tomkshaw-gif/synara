@@ -23,9 +23,9 @@ jobs:
     env:
       UPSTREAM_REPO: https://github.com/Emanuele-web04/synara.git
       SYNC_BRANCH: sync/upstream
-      # GITHUB_TOKEN works, but pushes/PRs it creates don't trigger CI runs.
-      # Add a fine-grained PAT as SYNC_PAT (contents+PRs on this repo) to get
-      # checks on the sync PR.
+      # SYNC_PAT authenticates both checkout/push and gh so sync CI can run
+      # automatically. GITHUB_TOKEN suppresses push-triggered runs; token-created
+      # PR runs may require manual approval.
       GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout main
@@ -33,6 +33,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Fetch upstream
         run: |
@@ -67,45 +68,16 @@ jobs:
             exit 0
           fi
 
-          version_files=(
-            apps/desktop/package.json
-            apps/server/package.json
-            apps/web/package.json
-            packages/contracts/package.json
-          )
-          allowed="$(printf '%s\n' "${version_files[@]}" bun.lock | sort)"
-          conflicts="$(git diff --name-only --diff-filter=U | sort)"
-          extra="$(comm -23 <(printf '%s\n' "$conflicts") <(printf '%s\n' "$allowed"))"
-          if [[ -n "$extra" ]]; then
-            git merge --abort
-            echo "Upstream merge conflicts outside the version files — manual merge needed:" >&2
-            echo "$extra" >&2
-            exit 1
-          fi
+          # Resolve only a stable version-field conflict in the merged text.
+          # Other manifest conflicts stop for manual review; never select a whole file.
+          bun scripts/resolve-upstream-version-conflicts.ts
 
-          # Version files conflict on every upstream release. Keep whichever side
-          # carries the higher semver so this repo never regresses its version.
-          for file in "${version_files[@]}"; do
-            if ! grep -Fxq "$file" <<< "$conflicts"; then
-              continue
-            fi
-            ours="$(git show ":2:$file" | node -pe 'JSON.parse(require("fs").readFileSync(0)).version')"
-            theirs="$(git show ":3:$file" | node -pe 'JSON.parse(require("fs").readFileSync(0)).version')"
-            winner="$(printf '%s\n%s\n' "$ours" "$theirs" | sort -V | tail -n1)"
-            if [[ "$winner" == "$ours" ]]; then
-              git checkout --ours "$file"
-            else
-              git checkout --theirs "$file"
-            fi
-            git add "$file"
-            echo "$file: ours=$ours theirs=$theirs -> kept $winner"
-          done
-
-          if grep -Fxq "bun.lock" <<< "$conflicts"; then
+          if git diff --name-only --diff-filter=U | grep -Fxq "bun.lock"; then
             git checkout --theirs bun.lock
-            bun install --lockfile-only --ignore-scripts
-            git add bun.lock
           fi
+          # Manifest resolution may change the version even if bun.lock merged cleanly.
+          bun install --lockfile-only --ignore-scripts
+          git add bun.lock
 
           git commit --no-edit
           echo "Merged with auto-resolved version files."
@@ -121,7 +93,7 @@ jobs:
           set -euo pipefail
           behind="${{ steps.status.outputs.behind }}"
           upstream_head="$(git rev-parse --short upstream/main)"
-          body=$'Automated merge of `upstream/main` (Emanuele-web04/synara) into `main`.\n\n**Merge this PR with a merge commit — do NOT squash.** Squashing drops the merge base, so the next upstream sync re-evaluates every diverged commit and produces repeated conflicts.\n\nVersion-file conflicts, if any, were auto-resolved to the higher semver; `bun.lock` was regenerated to match.'
+          body=$'Automated merge of `upstream/main` (Emanuele-web04/synara) into `main`.\n\n**Merge this PR with a merge commit — do NOT squash.** Squashing drops the merge base, so the next upstream sync re-evaluates every diverged commit and produces repeated conflicts.\n\nOnly stable version-field conflicts were auto-resolved; other merged manifest fields were preserved; `bun.lock` was regenerated to match.'
 
           existing="$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number')"
           if [[ -n "$existing" ]]; then

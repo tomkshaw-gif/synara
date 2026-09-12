@@ -1,9 +1,7 @@
 import {
-  RuntimeMode,
   ThreadId,
   type ApprovalRequestId,
   type ProviderApprovalDecision,
-  type ProviderRequestKind,
   type ProviderUserInputAnswers,
 } from "@synara/contracts";
 import {
@@ -23,7 +21,6 @@ import {
   expandCollapsedComposerCursor,
   type ComposerTrigger,
 } from "../../composer-logic";
-import { useComposerDraftStore } from "../../composerDraftStore";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
@@ -41,14 +38,12 @@ import {
   clearThreadDetailResumeCursor,
 } from "../../threadDetailResumeCursors";
 import { type Thread } from "../../types";
-import { resolveRuntimeModeAfterApprovalDecision } from "../ChatView.logic";
 import { usePendingUserInputDrafts } from "./usePendingUserInputDrafts";
 const EMPTY_ACTIVITIES: Thread["activities"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 interface ChatPendingInteractionsInput {
   threadId: ThreadId;
   activeThread: Thread | undefined;
-  runtimeMode: RuntimeMode;
   promptRef: RefObject<string>;
   setPrompt: (prompt: string) => void;
   setComposerCursor: Dispatch<SetStateAction<number>>;
@@ -59,7 +54,6 @@ interface ChatPendingInteractionsInput {
 export function useChatPendingInteractions({
   threadId,
   activeThread,
-  runtimeMode,
   promptRef,
   setPrompt,
   setComposerCursor,
@@ -69,7 +63,6 @@ export function useChatPendingInteractions({
   const activeThreadId = activeThread?.id ?? null;
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const setStoreThreadError = useStore((store) => store.setError);
-  const setComposerDraftRuntimeMode = useComposerDraftStore((state) => state.setRuntimeMode);
   const [respondingRequestKeys, setRespondingRequestKeys] = useState<string[]>([]);
   const [respondingUserInputRequestKeys, setRespondingUserInputRequestKeys] = useState<string[]>(
     [],
@@ -242,7 +235,6 @@ export function useChatPendingInteractions({
       requestId: ApprovalRequestId,
       decision: ProviderApprovalDecision,
       lifecycleGeneration?: string,
-      requestKind?: ProviderRequestKind,
     ) => {
       const api = readNativeApi();
       if (!api || !activeThreadId) return;
@@ -251,17 +243,8 @@ export function useChatPendingInteractions({
       setRespondingRequestKeys((existing) =>
         existing.includes(requestKey) ? existing : [...existing, requestKey],
       );
-      // Persist supervised "always allow" client-side so the next turn (after an
-      // idle-stop or runtime restart) uses full access. Auto remains the durable
-      // thread policy; its server-side override applies only to the live session.
-      const durableRuntimeMode = resolveRuntimeModeAfterApprovalDecision(
-        runtimeMode,
-        decision,
-        requestKind,
-      );
-      if (durableRuntimeMode) {
-        setComposerDraftRuntimeMode(activeThreadId, durableRuntimeMode);
-      }
+      // Approval decisions belong to the provider session. Only the explicit
+      // access-mode picker may change the durable thread policy.
       await api.orchestration
         .dispatchCommand({
           type: "thread.approval.respond",
@@ -300,7 +283,7 @@ export function useChatPendingInteractions({
         });
       setRespondingRequestKeys((existing) => existing.filter((key) => key !== requestKey));
     },
-    [activeThreadId, runtimeMode, setComposerDraftRuntimeMode, setStoreThreadError],
+    [activeThreadId, setStoreThreadError],
   );
 
   const userInputSubmissionsRef = useRef(new Set<string>());
