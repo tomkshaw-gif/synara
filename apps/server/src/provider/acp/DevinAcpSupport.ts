@@ -335,8 +335,11 @@ export function buildDevinAcpSpawnInput(
   runtimeMode: RuntimeMode,
   childEnvironment?: NodeJS.ProcessEnv,
 ): AcpSpawnInput {
-  // Devin's permission prompts surface through ACP request_permission events;
-  // the session itself needs no permission-mode flag to keep that flow intact.
+  // Devin's permission gating is session-scoped: ACP sessions ignore
+  // DEVIN_PERMISSION_MODE and start in "accept-edits". The adapter maps each
+  // Synara runtime mode onto the session's mode catalog via
+  // applyDevinSessionConfiguration (approval-required -> Code, auto -> Smart,
+  // full-access -> Bypass Permissions), so no spawn flag is needed here.
   void runtimeMode;
   const args = ["acp"];
   const model = devinSettings?.model?.trim();

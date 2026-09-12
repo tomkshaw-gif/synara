@@ -20,6 +20,7 @@ import {
 } from "../acp/GrokAcpExtension.ts";
 
 import {
+  annotateGrokClassifierBlockedToolCall,
   buildGrokPromptMeta,
   buildGrokTurnPromptText,
   extractGrokTerminalPlanMarkdown,
@@ -412,5 +413,40 @@ describe("GrokAdapter runtime event scoping", () => {
         description: "Highest effort and reasoning level",
       },
     ]);
+  });
+});
+
+describe("annotateGrokClassifierBlockedToolCall", () => {
+  const blockedDetail =
+    "Tool `run_terminal_command` was not executed: Auto mode blocked this action (kubectl exec is a hard-wait another-machine shell; it must wait regardless of the user asking to run it).";
+
+  it("appends Full access guidance to Grok's classifier deny text", () => {
+    const toolCall = annotateGrokClassifierBlockedToolCall({
+      toolCallId: "call-1",
+      status: "failed",
+      detail: blockedDetail,
+      data: { toolCallId: "call-1" },
+    });
+    expect(toolCall.detail).toContain(blockedDetail);
+    expect(toolCall.detail).toContain("Full access");
+    expect(toolCall.detail).toContain("Grok's own safety classifier");
+  });
+
+  it("leaves non-classifier failures and non-failed calls untouched", () => {
+    const other = {
+      toolCallId: "call-2",
+      status: "failed" as const,
+      detail: "command exited 1",
+      data: { toolCallId: "call-2" },
+    };
+    expect(annotateGrokClassifierBlockedToolCall(other)).toBe(other);
+
+    const running = {
+      toolCallId: "call-3",
+      status: "inProgress" as const,
+      detail: blockedDetail,
+      data: { toolCallId: "call-3" },
+    };
+    expect(annotateGrokClassifierBlockedToolCall(running)).toBe(running);
   });
 });

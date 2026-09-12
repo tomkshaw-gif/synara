@@ -414,6 +414,24 @@ export function isGrokContextCompactionToolCall(toolCall: AcpToolCallState): boo
   return /\b(compact|summariz)/u.test(haystack);
 }
 
+const GROK_AUTO_MODE_BLOCKED_PATTERN = /auto mode blocked this action/iu;
+const GROK_AUTO_MODE_BLOCKED_GUIDANCE =
+  "This was blocked by Grok's own safety classifier before Synara could approve it — production-class and remote-shell actions are hard-waited inside Grok, not by Synara. Re-run the action with this thread in Full access mode, or use a safer command.";
+
+// Grok denies "hard-wait" actions inside the agent without ever emitting an ACP
+// permission request, so Synara's approval UI never gets a chance to show a
+// card. Annotate the failure so the transcript explains who blocked it and how
+// to unblock instead of surfacing a bare dead-end tool error.
+export function annotateGrokClassifierBlockedToolCall(
+  toolCall: AcpToolCallState,
+): AcpToolCallState {
+  if (toolCall.status !== "failed") return toolCall;
+  const haystack = `${toolCall.title ?? ""}\n${toolCall.detail ?? ""}`;
+  if (!GROK_AUTO_MODE_BLOCKED_PATTERN.test(haystack)) return toolCall;
+  const base = toolCall.detail?.trim() || toolCall.title?.trim() || "Tool call failed.";
+  return { ...toolCall, detail: `${base}\n\n${GROK_AUTO_MODE_BLOCKED_GUIDANCE}` };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1470,7 +1488,10 @@ export function makeGrokAdapter(
                             provider: PROVIDER,
                             threadId: ctx.threadId,
                             turnId: lateTurnId,
-                            toolCall: scopeGrokToolCallStateForTurn(lateTurnId, event.toolCall),
+                            toolCall: scopeGrokToolCallStateForTurn(
+                              lateTurnId,
+                              annotateGrokClassifierBlockedToolCall(event.toolCall),
+                            ),
                             rawPayload: event.rawPayload,
                           }),
                         );
@@ -1482,7 +1503,8 @@ export function makeGrokAdapter(
                       }
                       ctx.turnToolCallIds.set(event.toolCall.toolCallId, activeTurnId);
                       yield* logNative(ctx.threadId, "session/update", event.rawPayload);
-                      const failedToolDetail = readAcpFailedToolDetail(event.toolCall);
+                      const toolCall = annotateGrokClassifierBlockedToolCall(event.toolCall);
+                      const failedToolDetail = readAcpFailedToolDetail(toolCall);
                       if (failedToolDetail !== undefined) {
                         ctx.activeTurnFailedToolDetail = failedToolDetail;
                       }
@@ -1493,7 +1515,7 @@ export function makeGrokAdapter(
                           provider: PROVIDER,
                           threadId: ctx.threadId,
                           turnId: activeTurnId,
-                          toolCall: scopeGrokToolCallStateForTurn(activeTurnId, event.toolCall),
+                          toolCall: scopeGrokToolCallStateForTurn(activeTurnId, toolCall),
                           rawPayload: event.rawPayload,
                         }),
                       );

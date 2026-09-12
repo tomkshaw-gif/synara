@@ -95,10 +95,22 @@ describe("buildGrokAcpSpawnInput", () => {
     ]);
   });
 
-  it("uses Grok's process-scoped approval override only for Full Access", () => {
+  it("maps Auto to Grok's native auto permission mode", () => {
+    expect(buildGrokAcpSpawnInput(undefined, "/tmp/project", "auto").args).toEqual([
+      "--permission-mode",
+      "auto",
+      "agent",
+      "--no-leader",
+      "stdio",
+    ]);
+  });
+
+  it("uses Grok's bypassPermissions mode for Full Access", () => {
+    // `--always-approve` alone does not lift Grok's hard-wait classifier in
+    // headless ACP sessions; bypassPermissions is the only mode that does.
     expect(buildGrokAcpSpawnInput(undefined, "/tmp/project", "full-access").args).toEqual([
       "--permission-mode",
-      "default",
+      "bypassPermissions",
       "agent",
       "--no-leader",
       "--always-approve",

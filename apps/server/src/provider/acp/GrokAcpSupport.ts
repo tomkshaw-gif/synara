@@ -102,12 +102,22 @@ export function buildGrokAcpSpawnInput(
   cwd: string,
   runtimeMode: RuntimeMode,
 ): AcpSpawnInput {
-  // Keep Grok's request-based mode as the explicit baseline. Full Access also
-  // needs the process-scoped override because some Grok builds deny before
-  // emitting an ACP permission request. Runtime-mode changes restart the Grok
-  // process, while native Plan mode plus Synara's pre-tool hook still gate
-  // writes on Plan turns.
-  const args = ["--permission-mode", "default", "agent", "--no-leader"];
+  // Map Synara runtime modes onto Grok's real permission modes. `auto` selects
+  // Grok's built-in action classifier (auto-allows safe actions, denies or
+  // escalates the rest); `default` is the baseline ask mode. Full Access needs
+  // `bypassPermissions`: Grok's "hard-wait" classifier (production mutations,
+  // remote shells, some pushes) still denies under `default`+`--always-approve`
+  // in headless ACP sessions, and only bypassPermissions lifts it. Provider-side
+  // `deny` rules and hooks still apply underneath. Runtime-mode changes restart
+  // the Grok process, while native Plan mode plus Synara's pre-tool hook still
+  // gate writes on Plan turns.
+  const permissionMode =
+    runtimeMode === "full-access"
+      ? "bypassPermissions"
+      : runtimeMode === "auto"
+        ? "auto"
+        : "default";
+  const args = ["--permission-mode", permissionMode, "agent", "--no-leader"];
   if (runtimeMode === "full-access") {
     args.push("--always-approve");
   }
