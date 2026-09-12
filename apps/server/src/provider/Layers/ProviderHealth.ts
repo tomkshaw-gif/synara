@@ -1254,6 +1254,8 @@ export const makeCheckGrokProviderStatus = (
       available: true,
       authStatus: hasApiKey ? ("authenticated" as const) : ("unknown" as const),
       version: parsedVersion,
+      supportsAutoRuntimeMode: true,
+      autoRuntimeModeBinaryPath: executable,
       checkedAt,
       ...(hasApiKey
         ? { authType: "apiKey", authLabel: "xAI API Key" }
@@ -1856,6 +1858,8 @@ export const makeCheckDevinProviderStatus = (
       available: true,
       authStatus: hasApiKey ? ("authenticated" as const) : ("unknown" as const),
       version: parsedVersion,
+      supportsAutoRuntimeMode: true,
+      autoRuntimeModeBinaryPath: executable,
       checkedAt,
       ...(hasApiKey
         ? { authType: "apiKey" as const, authLabel: "Devin API Key" }

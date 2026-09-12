@@ -107,7 +107,8 @@ export function buildGrokAcpSpawnInput(
   // emitting an ACP permission request. Runtime-mode changes restart the Grok
   // process, while native Plan mode plus Synara's pre-tool hook still gate
   // writes on Plan turns.
-  const args = ["--permission-mode", "default", "agent", "--no-leader"];
+  const permissionMode = runtimeMode === "auto" ? "auto" : "default";
+  const args = ["--permission-mode", permissionMode, "agent", "--no-leader"];
   if (runtimeMode === "full-access") {
     args.push("--always-approve");
   }

@@ -61,6 +61,7 @@ import { settleConcurrentTeardowns } from "../settleConcurrentTeardowns.ts";
 import { listFactoryPlugins, readFactoryPlugin } from "../FactoryPluginDiscovery.ts";
 import { readFactorySessionHistory } from "../FactorySessionHistory.ts";
 import { appendProviderReferencesPromptBlock } from "../promptReferenceProjection.ts";
+import { unsupportedAutoRuntimeModeMessage } from "@synara/shared/runtimeMode";
 import {
   type ProviderAdapterError,
   ProviderAdapterRequestError,
@@ -1453,7 +1454,7 @@ export function makeDroidAdapter(
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "sendTurn",
-            issue: "Auto runtime mode is available only to Codex and Claude.",
+            issue: unsupportedAutoRuntimeModeMessage(PROVIDER),
           });
         }
         // Selection changes normally arrive via a session restart, but a turn

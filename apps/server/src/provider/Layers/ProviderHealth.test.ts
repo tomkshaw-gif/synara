@@ -9,6 +9,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { vi } from "vitest";
 
 import { SYNARA_CODEX_HOME_OVERLAY_DIR } from "../../codexHomePaths";
+import { resolveDevinBinaryPath } from "../acp/DevinAcpSupport.ts";
 import { ServerConfig } from "../../config";
 import { ServerSettingsService } from "../../serverSettings";
 import { ProviderHealth } from "../Services/ProviderHealth";
@@ -2162,6 +2163,8 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         assert.strictEqual(status.available, true);
         assert.strictEqual(status.authStatus, "unknown");
         assert.strictEqual(status.version, "0.1.0");
+        assert.strictEqual(status.supportsAutoRuntimeMode, true);
+        assert.strictEqual(status.autoRuntimeModeBinaryPath, "grok");
       }).pipe(
         Effect.provide(
           mockSpawnerLayer((args) => {
@@ -2226,6 +2229,8 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       Effect.gen(function* () {
         const status = yield* makeCheckGrokProviderStatus("/custom/bin/grok");
         assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.supportsAutoRuntimeMode, true);
+        assert.strictEqual(status.autoRuntimeModeBinaryPath, "/custom/bin/grok");
       }).pipe(
         Effect.provide(
           mockSpawnerLayer((args, command) => {
@@ -2265,6 +2270,8 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         assert.strictEqual(status.authType, "apiKey");
         assert.strictEqual(status.authLabel, "Devin API Key");
         assert.strictEqual(status.version, "2.0.0");
+        assert.strictEqual(status.supportsAutoRuntimeMode, true);
+        assert.strictEqual(status.autoRuntimeModeBinaryPath, resolveDevinBinaryPath(undefined));
       }).pipe(
         Effect.provide(
           mockSpawnerLayer((args) => {
@@ -2292,7 +2299,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
 
     it.effect("returns ready with auth guidance when no Devin API key is set", () =>
       Effect.gen(function* () {
-        const status = yield* checkDevinProviderStatus;
+        const status = yield* makeCheckDevinProviderStatus(undefined, async () => undefined);
         assert.strictEqual(status.status, "ready");
         assert.strictEqual(status.available, true);
         assert.strictEqual(status.authStatus, "unknown");

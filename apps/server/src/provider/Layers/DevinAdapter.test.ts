@@ -1134,6 +1134,46 @@ describe("applyDevinSessionConfiguration", () => {
     ).rejects.toMatchObject({ _tag: "ProviderAdapterValidationError" });
     expect(calls).toEqual([]);
   });
+
+  it("rejects Auto when Devin acknowledges setMode without entering Smart", async () => {
+    const { runtime } = makeFakeAcpRuntime({
+      currentModeId: "accept-edits",
+      availableModes: [
+        { id: "accept-edits", name: "Code" },
+        { id: "smart", name: "Smart" },
+      ],
+    });
+    await expect(
+      Effect.runPromise(
+        applyDevinSessionConfiguration({
+          runtime: { ...runtime, setMode: () => Effect.succeed({} as Acp.SetSessionModeResponse) },
+          runtimeMode: "auto",
+          interactionMode: undefined,
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "ProviderAdapterValidationError" });
+  });
+
+  it("sets Devin's Smart session mode for Auto and verifies it took", async () => {
+    const { runtime, calls } = makeFakeAcpRuntime({
+      currentModeId: "accept-edits",
+      availableModes: [
+        { id: "accept-edits", name: "Code" },
+        { id: "smart", name: "Smart" },
+        { id: "bypass", name: "Full Access" },
+      ],
+    });
+
+    await Effect.runPromise(
+      applyDevinSessionConfiguration({
+        runtime,
+        runtimeMode: "auto",
+        interactionMode: undefined,
+      }),
+    );
+
+    expect(calls).toEqual([{ method: "setMode", args: ["smart"] }]);
+  });
 });
 
 describe("resolveRequestedModeId", () => {
@@ -1263,6 +1303,64 @@ describe("resolveRequestedModeId", () => {
         }),
       ),
     ).resolves.toBe("bypass");
+  });
+
+  it("maps Auto to Devin's Smart mode in the real Devin 3000.6.7 catalog", async () => {
+    await expect(
+      Effect.runPromise(
+        resolveRequestedModeId({
+          modeState: { currentModeId: "accept-edits", availableModes: devin300067Modes },
+          runtimeMode: "auto",
+          interactionMode: undefined,
+        }),
+      ),
+    ).resolves.toBe("smart");
+    await expect(
+      Effect.runPromise(
+        resolveRequestedModeId({
+          modeState: { currentModeId: "smart", availableModes: devin300067Modes },
+          runtimeMode: "auto",
+          interactionMode: undefined,
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects Auto when mode state is unavailable or Smart is missing", async () => {
+    await expect(
+      Effect.runPromise(
+        resolveRequestedModeId({
+          modeState: undefined,
+          runtimeMode: "auto",
+          interactionMode: undefined,
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "ProviderAdapterValidationError" });
+
+    await expect(
+      Effect.runPromise(
+        resolveRequestedModeId({
+          modeState: {
+            currentModeId: "accept-edits",
+            availableModes: devin300067Modes.filter((mode) => mode.id !== "smart"),
+          },
+          runtimeMode: "auto",
+          interactionMode: undefined,
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "ProviderAdapterValidationError" });
+  });
+
+  it("keeps Plan precedence over Auto mode", async () => {
+    await expect(
+      Effect.runPromise(
+        resolveRequestedModeId({
+          modeState: { currentModeId: "accept-edits", availableModes: devin300067Modes },
+          runtimeMode: "auto",
+          interactionMode: "plan",
+        }),
+      ),
+    ).resolves.toBe("plan");
   });
 });
 

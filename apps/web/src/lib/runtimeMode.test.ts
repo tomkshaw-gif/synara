@@ -8,9 +8,27 @@ import {
 } from "./runtimeMode";
 
 describe("runtime mode provider support", () => {
-  it("offers AI-reviewed auto mode to Codex and Claude Code", () => {
+  it("offers AI-reviewed auto mode to Codex, Claude Code, Devin, and Grok", () => {
     expect(providerSupportsAutoRuntimeMode("codex")).toBe(true);
     expect(providerSupportsAutoRuntimeMode("claudeAgent")).toBe(true);
+    expect(providerSupportsAutoRuntimeMode("devin")).toBe(true);
+    expect(providerSupportsAutoRuntimeMode("grok")).toBe(true);
+  });
+
+  it("shows Auto for Devin and Grok once the CLI reports support", () => {
+    for (const provider of ["devin", "grok"] as const) {
+      expect(
+        providerModelSupportsAutoRuntimeMode(provider, undefined, {
+          provider,
+          status: "ready",
+          available: true,
+          authStatus: "authenticated",
+          supportsAutoRuntimeMode: true,
+          checkedAt: new Date(0).toISOString(),
+        }),
+      ).toBe(true);
+      expect(providerModelSupportsAutoRuntimeMode(provider, undefined, null)).toBe(false);
+    }
   });
 
   it("falls back to supervised mode for providers without auto review", () => {

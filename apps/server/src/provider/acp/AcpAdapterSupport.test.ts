@@ -95,6 +95,22 @@ describe("AcpAdapterSupport", () => {
     ).toEqual({ outcome: "selected", optionId: "implement-once" });
   });
 
+  it("keeps native Auto requests interactive and denies Plan or ownerless requests", () => {
+    const options = [
+      { kind: "allow_once", optionId: "allow" },
+      { kind: "reject_once", optionId: "deny" },
+    ] as const;
+    expect(
+      resolveAcpPermissionPolicy({ runtimeMode: "auto", interactionMode: "default", options }),
+    ).toBeUndefined();
+    expect(
+      resolveAcpPermissionPolicy({ runtimeMode: "auto", interactionMode: "plan", options }),
+    ).toEqual({ outcome: "selected", optionId: "deny" });
+    expect(
+      resolveAcpPermissionPolicy({ runtimeMode: "auto", interactionMode: undefined, options }),
+    ).toEqual({ outcome: "cancelled" });
+  });
+
   it("surfaces Default prompts only for active approval-required turns", () => {
     const options = [{ kind: "allow_once", optionId: "allow" }] as const;
 

@@ -319,6 +319,7 @@ const DEVIN_COMPACT_OUTCOME_MAX_WAIT_MS = 2_000;
 
 const ACP_PLAN_MODE_ALIASES = ["plan", "architect"] as const;
 const ACP_APPROVAL_MODE_ALIASES = ["accept-edits", "code"] as const;
+const ACP_AUTO_MODE_ALIASES = ["smart", "auto"] as const;
 const ACP_FULL_ACCESS_MODE_ALIASES = ["bypass", "full access"] as const;
 const DEVIN_PLAN_MODE_PROMPT_PREFIX = [
   "Devin plan mode is active.",
@@ -539,7 +540,7 @@ export function resolveRequestedModeId(input: {
       const requiredBy =
         interactionMode === "plan"
           ? "plan interaction mode"
-          : runtimeMode === "approval-required"
+          : runtimeMode === "approval-required" || runtimeMode === "auto"
             ? `runtime mode "${runtimeMode}"`
             : undefined;
 
@@ -557,9 +558,11 @@ export function resolveRequestedModeId(input: {
     const aliases =
       interactionMode === "plan"
         ? ACP_PLAN_MODE_ALIASES
-        : runtimeMode === "approval-required"
-          ? ACP_APPROVAL_MODE_ALIASES
-          : ACP_FULL_ACCESS_MODE_ALIASES;
+        : runtimeMode === "auto"
+          ? ACP_AUTO_MODE_ALIASES
+          : runtimeMode === "approval-required"
+            ? ACP_APPROVAL_MODE_ALIASES
+            : ACP_FULL_ACCESS_MODE_ALIASES;
 
     // For plan mode, only an exact normalized id or name match is considered
     // safe; whole-token matching is too permissive for a fail-closed gate.

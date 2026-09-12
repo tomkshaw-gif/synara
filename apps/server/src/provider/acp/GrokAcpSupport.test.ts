@@ -95,6 +95,16 @@ describe("buildGrokAcpSpawnInput", () => {
     ]);
   });
 
+  it("uses native Auto without the approval bypass", () => {
+    expect(buildGrokAcpSpawnInput(undefined, "/tmp/project", "auto").args).toEqual([
+      "--permission-mode",
+      "auto",
+      "agent",
+      "--no-leader",
+      "stdio",
+    ]);
+  });
+
   it("uses Grok's process-scoped approval override only for Full Access", () => {
     expect(buildGrokAcpSpawnInput(undefined, "/tmp/project", "full-access").args).toEqual([
       "--permission-mode",
