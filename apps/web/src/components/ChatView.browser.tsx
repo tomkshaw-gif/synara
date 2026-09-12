@@ -4022,7 +4022,24 @@ describe("ChatView transcript geometry (full app)", () => {
             .querySelector(anchorSelector)!
             .querySelectorAll("p, li")
             [anchorIndex]!.getBoundingClientRect().top;
-        const detachedTop = readAnchorTop();
+        // The baseline must come from a quiet viewport: the gesture's own
+        // scroll and LegendList's measured-size compensation can still be in
+        // flight after waitForLayout, and a mid-flight read becomes a baseline
+        // the settled transcript can never match.
+        let lastAnchorTop = readAnchorTop();
+        let anchorQuietSince = performance.now();
+        await vi.waitFor(
+          () => {
+            const top = readAnchorTop();
+            if (Math.abs(top - lastAnchorTop) > 0.5) {
+              lastAnchorTop = top;
+              anchorQuietSince = performance.now();
+            }
+            expect(performance.now() - anchorQuietSince).toBeGreaterThanOrEqual(150);
+          },
+          { timeout: 8_000, interval: 20 },
+        );
+        const detachedTop = lastAnchorTop;
         for (let index = 0; index < 3; index += 1) {
           grow();
           await waitForLayout();
@@ -4048,7 +4065,12 @@ describe("ChatView transcript geometry (full app)", () => {
         }
         // The list may compensate scrollTop as estimated rows settle. The text
         // the reader is looking at must remain at the same viewport position.
-        expect(readAnchorTop()).toBeCloseTo(detachedTop, 0);
+        // Poll so a compensation still in flight gets its remaining frames
+        // instead of failing on a mid-settle read.
+        await vi.waitFor(
+          () => expect(readAnchorTop()).toBeCloseTo(detachedTop, 0),
+          FOLLOW_ASSERT_TIMEOUT,
+        );
         if (action === "thread switch") {
           await mounted.router.navigate({
             to: "/$threadId",
