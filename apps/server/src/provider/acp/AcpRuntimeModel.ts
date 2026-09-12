@@ -590,6 +590,24 @@ export function mergeToolCallState(
   };
 }
 
+// ACP agents that omit toolCall.kind/rawInput may still carry the command under
+// a vendor _meta key (Devin uses `cognition.ai/editableCommand`). Surface it so
+// the request classifies and labels like a normal command approval instead of
+// falling through as an anonymous "unknown" request.
+function readMetaCommand(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+  for (const [key, value] of Object.entries(meta)) {
+    if (
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      key.toLowerCase().endsWith("editablecommand")
+    ) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
 export function parsePermissionRequest(params: Acp.RequestPermissionRequest): AcpPermissionRequest {
   const toolCall = makeToolCallState(
     {
@@ -604,8 +622,11 @@ export function parsePermissionRequest(params: Acp.RequestPermissionRequest): Ac
     },
     { fallbackStatus: "pending" },
   );
-  const kind = normalizeToolKind(params.toolCall.kind) ?? "unknown";
+  const metaCommand = readMetaCommand(params.toolCall._meta) ?? readMetaCommand(params._meta);
+  const kind =
+    normalizeToolKind(params.toolCall.kind) ?? (metaCommand !== undefined ? "execute" : "unknown");
   const detail =
+    metaCommand ??
     toolCall?.command ??
     toolCall?.title ??
     toolCall?.detail ??

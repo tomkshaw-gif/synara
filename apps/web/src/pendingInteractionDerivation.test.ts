@@ -216,6 +216,36 @@ describe("derivePendingApprovals", () => {
     ]);
   });
 
+  it("still derives an actionable approval for unrecognized request types", () => {
+    // Providers can emit session/request_permission without a mappable kind
+    // (Devin puts the command under toolCall._meta). The request is still a
+    // live callback awaiting a human — it must render a generic card rather
+    // than wedging the turn with no answerable surface.
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-unknown-request-type",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-unknown-kind",
+          requestType: "unknown",
+          detail: "Session seasoned-button",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-unknown-kind",
+        requestKind: "other",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        detail: "Session seasoned-button",
+      },
+    ]);
+  });
+
   it("preserves the requested permission profile for approval rendering", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

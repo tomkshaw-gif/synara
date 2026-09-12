@@ -122,7 +122,9 @@ export function resolveRuntimeModeAfterApprovalDecision(
   // Permission-profile grants are narrower than a runtime-mode override.
   // Their acceptForSession decision is persisted by the provider for only
   // that permission set and must not silently broaden the whole thread.
-  if (requestKind === "permissions") {
+  // Unclassified ("other") requests get the same treatment: an unknown scope
+  // must never upgrade the thread to full access on its own.
+  if (requestKind === "permissions" || requestKind === "other") {
     return null;
   }
   if (decision === "acceptForSession" && currentRuntimeMode === "approval-required") {

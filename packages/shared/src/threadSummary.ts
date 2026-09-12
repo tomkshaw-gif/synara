@@ -24,7 +24,7 @@ export interface PendingThreadRequestIds {
 }
 
 export type PendingThreadRequestKind = "approval" | "user-input";
-export type ApprovalRequestKind = "command" | "file-read" | "file-change" | "permissions";
+export type ApprovalRequestKind = "command" | "file-read" | "file-change" | "permissions" | "other";
 
 export function pendingRequestInstanceKey(requestId: string, lifecycleGeneration?: string): string {
   return `${requestId}\u0000${lifecycleGeneration ?? "legacy"}`;
@@ -103,7 +103,10 @@ export function approvalRequestKindFromRequestType(
     case "permissions_approval":
       return "permissions";
     default:
-      return null;
+      // An unrecognized request type is still a live provider callback waiting
+      // on a human decision — map it to a generic approval so the card renders
+      // instead of silently wedging the turn with no answerable surface.
+      return "other";
   }
 }
 
@@ -271,7 +274,8 @@ export function derivePendingThreadRequestIds(input: {
         payload?.requestKind === "command" ||
         payload?.requestKind === "file-read" ||
         payload?.requestKind === "file-change" ||
-        payload?.requestKind === "permissions"
+        payload?.requestKind === "permissions" ||
+        payload?.requestKind === "other"
           ? payload.requestKind
           : approvalRequestKindFromRequestType(payload?.requestType);
       if (requestKind) {

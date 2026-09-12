@@ -626,4 +626,27 @@ describe("AcpRuntimeModel", () => {
       },
     });
   });
+
+  it("reads the command from vendor _meta when the toolCall omits kind and title", () => {
+    // Devin sends session/request_permission with only a toolCallId and the
+    // editable command under _meta — no kind, title, or rawInput.
+    const request = parsePermissionRequest({
+      sessionId: "seasoned-button",
+      options: [
+        { optionId: "allow_once", name: "Allow", kind: "allow_once" },
+        { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+      ],
+      toolCall: {
+        toolCallId: "exec_24",
+        _meta: {
+          "cognition.ai/editableCommand": 'cp ".env" ".env.backup" && grep VOLUMETRICA .env',
+        },
+      },
+    });
+
+    expect(request).toMatchObject({
+      kind: "execute",
+      detail: 'cp ".env" ".env.backup" && grep VOLUMETRICA .env',
+    });
+  });
 });

@@ -5,9 +5,10 @@
 // Depends on: provider runtime item metadata already truncated by server ingestion
 
 import type { ToolLifecycleItemType } from "@synara/contracts";
+import type { ApprovalRequestKind } from "@synara/shared/threadSummary";
 import { stripTrailingToolExitCode as stripTrailingExitCode } from "@synara/shared/toolOutputSummary";
 
-type WorkLogRequestKind = "command" | "file-read" | "file-change" | "permissions";
+type WorkLogRequestKind = ApprovalRequestKind;
 
 export interface WorkLogToolOutputDetails {
   output?: string;
