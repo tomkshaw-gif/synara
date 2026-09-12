@@ -198,6 +198,18 @@ jobs:
         timeout-minutes: 20
         run: bun run --cwd apps/web test:browser:ci -- --project=${{ matrix.project }} --shard=${{ matrix.shard }}
 
+      # Browser failures write per-test screenshots next to their spec under
+      # src/**/__screenshots__. Without an upload, a shared-runner flake leaves
+      # no evidence to diagnose — the job log alone does not show geometry.
+      - name: Upload browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-screenshots-${{ matrix.project }}-${{ strategy.job-index }}
+          path: apps/web/src/**/__screenshots__/**/*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
   build:
     name: Desktop Build
     runs-on: ubuntu-24.04
