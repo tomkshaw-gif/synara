@@ -23,7 +23,7 @@ async function makeInput(overrides: Record<string, unknown> = {}) {
     connection: { url: "http://127.0.0.1:3773/mcp", bearerToken: "REAL-BEARER" },
     stdioProxy: { command: process.execPath, args: ["/proxy.mjs"] },
     bootstrapToken: "spent-one-shot-bootstrap",
-    env: { HOME: home, XDG_CONFIG_HOME: xdg, XDG_DATA_HOME: "/real/data" },
+    env: { HOME: home, APPDATA: xdg, XDG_CONFIG_HOME: xdg, XDG_DATA_HOME: "/real/data" },
     tmpDir: root,
     ...overrides,
   };
@@ -58,7 +58,9 @@ describe("createDevinSessionConfig", () => {
     expect(await readFile(source, "utf8")).toBe(original);
     expect(config.childEnvironment.HOME).toBe(input.env.HOME);
     expect(config.childEnvironment.XDG_DATA_HOME).toBe("/real/data");
-    expect(config.childEnvironment.XDG_CONFIG_HOME).toBe(config.root);
+    expect(
+      config.childEnvironment[process.platform === "win32" ? "APPDATA" : "XDG_CONFIG_HOME"],
+    ).toBe(config.root);
     await expect(
       access(path.join(config.root, "devin", "skills", "native")),
     ).resolves.toBeUndefined();
@@ -67,11 +69,16 @@ describe("createDevinSessionConfig", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("contains no session bearer and uses owner-only POSIX permissions", async () => {
+  it("contains no session bearer", async () => {
     const config = await createDevinSessionConfig(await makeInput());
     configs.push(config);
     const generated = await readFile(config.configPath, "utf8");
     expect(generated).not.toContain("REAL-BEARER");
+  });
+
+  it.skipIf(process.platform === "win32")("uses owner-only POSIX permissions", async () => {
+    const config = await createDevinSessionConfig(await makeInput());
+    configs.push(config);
     expect((await stat(config.root)).mode & 0o777).toBe(0o700);
     expect((await stat(config.configPath)).mode & 0o777).toBe(0o600);
   });

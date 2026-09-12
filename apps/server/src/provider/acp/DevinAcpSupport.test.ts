@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Effect, Layer, Schedule, Stream } from "effect";
 import * as AcpErrors from "./AcpErrors.ts";
 import * as OfficialAcp from "@agentclientprotocol/sdk";
@@ -697,7 +698,17 @@ devin_webapp_host = "https://app.devin.ai"
         { HOME: "/home/test", XDG_DATA_HOME: "/home/test/data" },
         "linux",
       ),
-    ).toBe("/home/test/data/devin/credentials.toml");
+    ).toBe(path.join("/home/test/data", "devin", "credentials.toml"));
+  });
+
+  it("prefers APPDATA over HOME and XDG paths on Windows", () => {
+    const appData = path.join("test-profile", "AppData", "Roaming");
+    expect(
+      resolveDevinCredentialsPath(
+        { APPDATA: appData, HOME: "ignored-home", XDG_DATA_HOME: "ignored-xdg" },
+        "win32",
+      ),
+    ).toBe(path.join(appData, "devin", "credentials.toml"));
   });
 
   it("passes the stored API key to Devin ACP as host auth metadata", async () => {
