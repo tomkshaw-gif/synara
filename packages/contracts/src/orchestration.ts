@@ -258,6 +258,7 @@ export const ProviderRequestKind = Schema.Literals([
   "file-read",
   "file-change",
   "permissions",
+  "other",
 ]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);

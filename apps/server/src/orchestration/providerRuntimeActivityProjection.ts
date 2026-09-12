@@ -508,14 +508,16 @@ export function runtimeTurnState(
 
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
-): "command" | "file-read" | "file-change" | "permissions" | undefined {
+): "command" | "file-read" | "file-change" | "permissions" | "other" | undefined {
   if (requestType === "command_execution_approval" || requestType === "exec_command_approval")
     return "command";
   if (requestType === "file_read_approval") return "file-read";
   if (requestType === "permissions_approval") return "permissions";
-  return requestType === "file_change_approval" || requestType === "apply_patch_approval"
-    ? "file-change"
-    : undefined;
+  if (requestType === "file_change_approval" || requestType === "apply_patch_approval")
+    return "file-change";
+  // Any other live approval request still needs an answerable surface —
+  // label it "other" so the web derives a generic card instead of dropping it.
+  return requestType !== undefined && requestType.length > 0 ? "other" : undefined;
 }
 
 function requestedPermissionProfile(

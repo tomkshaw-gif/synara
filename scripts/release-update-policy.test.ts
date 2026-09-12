@@ -122,6 +122,46 @@ describe("release update policy", () => {
     }
   });
 
+  it("scopes update manifests to the configured platforms", () => {
+    const root = mkdtempSync(join(tmpdir(), "synara-release-policy-"));
+    try {
+      writeFileSync(resolve(root, "latest.yml"), "latest.yml");
+      writeFileSync(resolve(root, "latest-linux.yml"), "latest-linux.yml");
+
+      const forkConfig: ReleaseUpdatePolicyConfig = {
+        ...cleanConfig,
+        platforms: ["windows", "linux"],
+      };
+      expect(prepareReleaseUpdateManifests(root, forkConfig)).toEqual([
+        "latest.yml",
+        "latest-linux.yml",
+        ...channelManifestNames("synara", ["windows", "linux"]),
+      ]);
+      expect(readFileSync(resolve(root, "synara.yml"), "utf8")).toBe("latest.yml");
+      expect(readFileSync(resolve(root, "synara-linux.yml"), "utf8")).toBe("latest-linux.yml");
+      expect(existsSync(resolve(root, "synara-mac.yml"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("still requires every configured platform's manifest", () => {
+    const root = mkdtempSync(join(tmpdir(), "synara-release-policy-"));
+    try {
+      writeFileSync(resolve(root, "latest.yml"), "latest.yml");
+
+      const forkConfig: ReleaseUpdatePolicyConfig = {
+        ...cleanConfig,
+        platforms: ["windows", "linux"],
+      };
+      expect(() => prepareReleaseUpdateManifests(root, forkConfig)).toThrow(
+        "Latest release is missing update manifests: latest-linux.yml",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a clean Latest release with missing default metadata", () => {
     const root = mkdtempSync(join(tmpdir(), "synara-release-policy-"));
     try {

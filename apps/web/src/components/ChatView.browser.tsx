@@ -2190,6 +2190,112 @@ describe("ChatView transcript geometry (full app)", () => {
     document.body.innerHTML = "";
   });
 
+  it.each([false, true])("keeps session approval scoped when dispatch fails=%s", async (fails) => {
+    const requestId = ApprovalRequestId.makeUnsafe("session-scope");
+    const generation = "session-scope-generation";
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: MessageId.makeUnsafe("msg-session-scope"),
+      targetText: "Run the requested command",
+    });
+    const thread = snapshot.threads[0]!;
+    const pendingThread = {
+      ...thread,
+      runtimeMode: "approval-required" as const,
+      session: thread.session
+        ? { ...thread.session, runtimeMode: "approval-required" as const }
+        : null,
+      activities: [
+        {
+          id: EventId.makeUnsafe("session-scope-request"),
+          createdAt: NOW_ISO,
+          kind: "approval.requested",
+          summary: "Command approval requested",
+          tone: "approval" as const,
+          turnId: null,
+          sequence: 1,
+          payload: {
+            requestId,
+            lifecycleGeneration: generation,
+            requestKind: "command",
+            detail: "Command: git status",
+          },
+        },
+      ],
+      pendingInteractions: [
+        {
+          interactionKind: "approval" as const,
+          requestId,
+          threadId: thread.id,
+          turnId: null,
+          lifecycleGeneration: generation,
+          status: "pending" as const,
+          decision: null,
+          responseCommandId: null,
+          responseRequestedAt: null,
+          createdAt: NOW_ISO,
+          resolvedAt: null,
+        },
+      ],
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: { ...snapshot, threads: [pendingThread] },
+    });
+    useComposerDraftStore.getState().setRuntimeMode(THREAD_ID, "approval-required");
+    const previousNativeApi = window.nativeApi;
+    const api = readNativeApi()!;
+    const dispatchCommand = vi.fn(async (_command: unknown) => {
+      if (fails) throw new Error("Session approval transport failed");
+      return { sequence: 2 };
+    });
+    Object.defineProperty(window, "nativeApi", {
+      configurable: true,
+      value: {
+        ...api,
+        orchestration: { ...api.orchestration, dispatchCommand },
+      },
+    });
+    try {
+      await page.getByRole("button", { name: /Always allow this session/u }).click();
+      await vi.waitFor(() => expect(dispatchCommand).toHaveBeenCalledTimes(1));
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "thread.approval.respond",
+          threadId: THREAD_ID,
+          requestId,
+          decision: "acceptForSession",
+          lifecycleGeneration: generation,
+        }),
+      );
+      expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.runtimeMode).toBe(
+        "approval-required",
+      );
+      if (fails) {
+        await expect
+          .element(page.getByRole("alert").getByText("Session approval transport failed"))
+          .toBeInTheDocument();
+        await page.getByRole("button", { name: /Always allow this session/u }).click();
+        await vi.waitFor(() => expect(dispatchCommand).toHaveBeenCalledTimes(2));
+        expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.runtimeMode).toBe(
+          "approval-required",
+        );
+      }
+      expect(
+        dispatchCommand.mock.calls.every(
+          ([command]) => (command as { type: string }).type === "thread.approval.respond",
+        ),
+      ).toBe(true);
+    } finally {
+      if (previousNativeApi)
+        Object.defineProperty(window, "nativeApi", {
+          configurable: true,
+          value: previousNativeApi,
+        });
+      else Reflect.deleteProperty(window, "nativeApi");
+      await mounted.cleanup();
+    }
+  });
+
   it("refreshes the full conversation when an approval was already answered", async () => {
     const requestId = ApprovalRequestId.makeUnsafe("approval-refresh-race");
     const snapshot = createSnapshotForTargetUser({

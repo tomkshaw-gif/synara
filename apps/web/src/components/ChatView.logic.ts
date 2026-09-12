@@ -6,9 +6,7 @@ import {
   type GitWorktreeSetupProgressEvent,
   type ModelSelection,
   type ModelSlug,
-  type ProviderApprovalDecision,
   type ProviderKind,
-  type ProviderRequestKind,
   type RuntimeMode,
   type ServerProviderAuthStatus,
   type ThreadId as ThreadIdType,
@@ -103,32 +101,6 @@ export function hasFileUndoSettled(input: {
     }
     return targetTurnCounts.has(activity.payload.turnCount);
   });
-}
-
-/**
- * "Always allow" (acceptForSession) only auto-approves the live provider turn.
- * Because the client is the source of truth for runtime mode (it sends it with
- * every turn), a supervised thread must also flip to full-access so the choice
- * survives idle-stop and runtime restarts. Auto is different: its AI reviewer
- * remains the durable policy, while acceptForSession applies only to the current
- * live provider session. Returns the runtime mode to persist, or null when
- * nothing changes.
- */
-export function resolveRuntimeModeAfterApprovalDecision(
-  currentRuntimeMode: RuntimeMode,
-  decision: ProviderApprovalDecision,
-  requestKind?: ProviderRequestKind,
-): RuntimeMode | null {
-  // Permission-profile grants are narrower than a runtime-mode override.
-  // Their acceptForSession decision is persisted by the provider for only
-  // that permission set and must not silently broaden the whole thread.
-  if (requestKind === "permissions") {
-    return null;
-  }
-  if (decision === "acceptForSession" && currentRuntimeMode === "approval-required") {
-    return "full-access";
-  }
-  return null;
 }
 
 export async function commitAfterRuntimeModePersistence(input: {

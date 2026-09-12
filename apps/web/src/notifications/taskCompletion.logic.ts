@@ -8,7 +8,7 @@ import {
   type TerminalCliKind,
   type TerminalVisualState,
 } from "@synara/shared/terminalThreads";
-import { pendingRequestInstanceKey } from "@synara/shared/threadSummary";
+import { pendingRequestInstanceKey, type ApprovalRequestKind } from "@synara/shared/threadSummary";
 import type { Thread, ThreadSession } from "../types";
 import {
   derivePendingApprovals,
@@ -32,7 +32,7 @@ export interface ThreadAttentionCandidate {
   title: string;
   requestId: string;
   createdAt: string;
-  requestKind?: "command" | "file-read" | "file-change" | "permissions";
+  requestKind?: ApprovalRequestKind;
   summary?: string;
 }
 
@@ -646,9 +646,7 @@ export function collectCompletedTerminalCandidates(
   return candidates;
 }
 
-function approvalSummary(
-  requestKind: "command" | "file-read" | "file-change" | "permissions",
-): string {
+function approvalSummary(requestKind: ApprovalRequestKind): string {
   switch (requestKind) {
     case "command":
       return "Command approval requested.";
@@ -658,6 +656,8 @@ function approvalSummary(
       return "File-change approval requested.";
     case "permissions":
       return "Permission approval requested.";
+    case "other":
+      return "Approval requested.";
   }
 }
 

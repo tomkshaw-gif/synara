@@ -12,6 +12,7 @@ import {
 import {
   approvalRequestKindFromRequestType,
   pendingRequestInstanceKey,
+  type ApprovalRequestKind,
 } from "@synara/shared/threadSummary";
 
 import { orderedActivities } from "./workLog";
@@ -21,7 +22,7 @@ export interface PendingApproval {
   lifecycleGeneration?: string;
   /** Changes only when the durable retryable response attempt changes. */
   responseAttemptKey?: string;
-  requestKind: "command" | "file-read" | "file-change" | "permissions";
+  requestKind: ApprovalRequestKind;
   createdAt: string;
   detail?: string;
   permissionProfile?: Record<string, unknown>;
@@ -306,7 +307,8 @@ export function derivePendingApprovals(
           payload?.requestKind === "command" ||
           payload?.requestKind === "file-read" ||
           payload?.requestKind === "file-change" ||
-          payload?.requestKind === "permissions"
+          payload?.requestKind === "permissions" ||
+          payload?.requestKind === "other"
             ? payload.requestKind
             : approvalRequestKindFromRequestType(payload?.requestType);
         if (!requestKind) {

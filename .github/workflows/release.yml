@@ -39,6 +39,7 @@ jobs:
       release_lane: ${{ steps.release_meta.outputs.release_lane }}
       bridge_tag: ${{ steps.release_meta.outputs.bridge_tag }}
       update_channel: ${{ steps.release_meta.outputs.update_channel }}
+      allow_unsigned_windows: ${{ steps.release_meta.outputs.allow_unsigned_windows }}
       source_commit: ${{ steps.source_provenance.outputs.source_commit }}
       source_tag: ${{ steps.source_provenance.outputs.source_tag }}
       lockfile_sha256: ${{ steps.source_provenance.outputs.lockfile_sha256 }}
@@ -164,16 +165,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS arm64
-            runner: macos-14
-            platform: mac
-            target: dmg
-            arch: arm64
-          - label: macOS x64
-            runner: macos-15-intel
-            platform: mac
-            target: dmg
-            arch: x64
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
@@ -226,7 +217,7 @@ jobs:
           AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
           AZURE_TRUSTED_SIGNING_SUBJECT_DN: ${{ secrets.AZURE_TRUSTED_SIGNING_SUBJECT_DN }}
           SYNARA_PUBLISH_RELEASE: ${{ needs.preflight.outputs.publish_release }}
-          ALLOW_UNSIGNED_WINDOWS_PUBLICATION: ${{ vars.SYNARA_ALLOW_UNSIGNED_WINDOWS_RELEASE == needs.preflight.outputs.version }}
+          ALLOW_UNSIGNED_WINDOWS_PUBLICATION: ${{ needs.preflight.outputs.allow_unsigned_windows == 'true' || vars.SYNARA_ALLOW_UNSIGNED_WINDOWS_RELEASE == needs.preflight.outputs.version }}
           SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
           SOURCE_TAG: ${{ needs.preflight.outputs.source_tag }}
           LOCKFILE_SHA256: ${{ needs.preflight.outputs.lockfile_sha256 }}
@@ -352,7 +343,7 @@ jobs:
           LOCKFILE_SHA256: ${{ needs.preflight.outputs.lockfile_sha256 }}
           PUBLISH_RELEASE: ${{ needs.preflight.outputs.publish_release }}
           SIGNED_ARTIFACT: ${{ steps.build_artifact.outputs.signed }}
-          ALLOW_UNSIGNED_WINDOWS_PUBLICATION: ${{ vars.SYNARA_ALLOW_UNSIGNED_WINDOWS_RELEASE == needs.preflight.outputs.version }}
+          ALLOW_UNSIGNED_WINDOWS_PUBLICATION: ${{ needs.preflight.outputs.allow_unsigned_windows == 'true' || vars.SYNARA_ALLOW_UNSIGNED_WINDOWS_RELEASE == needs.preflight.outputs.version }}
         run: |
           node scripts/write-release-artifact-provenance.ts \
             --assets-dir release-publish \
@@ -498,6 +489,7 @@ jobs:
           path: release-assets
 
       - name: Merge macOS updater manifests
+        if: ${{ hashFiles('release-assets/latest-mac.yml') != '' }}
         run: |
           node scripts/merge-mac-update-manifests.ts \
             release-assets/latest-mac.yml \
@@ -593,8 +585,6 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
             release-assets/*.AppImage
             release-assets/*.exe
             release-assets/*.blockmap

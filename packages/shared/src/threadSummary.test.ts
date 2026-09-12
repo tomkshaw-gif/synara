@@ -22,8 +22,9 @@ describe("approvalRequestKindFromRequestType", () => {
     ["file_read_approval", "file-read"],
     ["file_change_approval", "file-change"],
     ["apply_patch_approval", "file-change"],
-    ["unknown", null],
-    [null, null],
+    ["unknown", "other"],
+    ["dynamic_tool_call", "other"],
+    [null, "other"],
   ] as const)("maps %s to %s", (requestType, expected) => {
     expect(approvalRequestKindFromRequestType(requestType)).toBe(expected);
   });
