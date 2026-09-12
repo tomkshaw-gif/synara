@@ -157,6 +157,7 @@ export function useTailAnchorScroll({
     let disposed = false;
     let frameId: number | null = null;
     let layoutObserver: MutationObserver | null = null;
+    let observedScrollContainer: HTMLElement | null = null;
     // The transcript's top padding is fixed for the life of a slide, so the
     // (layout-forcing) computed-style read is done once instead of every frame.
     let topInsetPx: number | null = null;
@@ -190,6 +191,8 @@ export function useTailAnchorScroll({
       anchorSlideCorrectionRef.current = null;
       layoutObserver?.disconnect();
       layoutObserver = null;
+      observedScrollContainer?.removeEventListener("scroll", onForeignScroll);
+      observedScrollContainer = null;
     }
 
     // The slide is over (or was never possible): hand scroll ownership back to
@@ -224,6 +227,11 @@ export function useTailAnchorScroll({
       const elapsedMs = now - startedAt;
 
       const container = getScrollContainer(listRef);
+      if (container && container !== observedScrollContainer) {
+        observedScrollContainer?.removeEventListener("scroll", onForeignScroll);
+        observedScrollContainer = container;
+        container.addEventListener("scroll", onForeignScroll, { passive: true });
+      }
       if (container && topInsetPx === null) {
         topInsetPx = Number.parseFloat(window.getComputedStyle(container).paddingTop) || 0;
       }
@@ -377,6 +385,13 @@ export function useTailAnchorScroll({
     anchorSlideCorrectionRef.current = () => {
       advanceAnchorSlide(performance.now());
     };
+
+    // Re-applied on the container's own scroll event: idempotent — after the
+    // correction lands, the next event finds the anchor already on its
+    // coordinate and writes nothing, so the loop cannot feed itself.
+    function onForeignScroll(): void {
+      anchorSlideCorrectionRef.current?.();
+    }
     const timelineRoot = timelineRootRef.current;
     if (timelineRoot && typeof MutationObserver !== "undefined") {
       layoutObserver = new MutationObserver(() => {
@@ -394,6 +409,16 @@ export function useTailAnchorScroll({
         subtree: true,
       });
     }
+
+    // Scroll writes that bypass DOM mutation — the list's own end-follow,
+    // its size-adjust position restores, the browser clamping scrollTop while
+    // the end-space reserve is being remeasured — dispatch a `scroll` event,
+    // not a style mutation, so the observer above cannot see them. Correcting
+    // from the event runs before the displaced position is painted; waiting
+    // for the next rAF leaves the anchored message a full frame off its
+    // coordinate (a visible hop while steering a still-growing turn).
+    observedScrollContainer = getScrollContainer(listRef);
+    observedScrollContainer?.addEventListener("scroll", onForeignScroll, { passive: true });
 
     // Deliberately ignores the timestamp the frame callback is handed: it is the
     // frame's projected presentation time, which does not share an origin with
