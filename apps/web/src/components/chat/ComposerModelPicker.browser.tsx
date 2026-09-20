@@ -4,6 +4,7 @@ import {
   type CodexModelOptions,
   type ModelSlug,
   type ProviderKind,
+  type ProviderModelDescriptor,
   type ServerProviderStatus,
   ThreadId,
 } from "@synara/contracts";
@@ -63,35 +64,46 @@ function readyProvider(provider: ProviderKind): ServerProviderStatus {
 }
 
 type HarnessProps = {
+  provider?: ProviderKind;
   lockedProvider?: ProviderKind | null;
+  providers?: ReadonlyArray<ServerProviderStatus>;
   modelOptionsByProvider?: React.ComponentProps<
     typeof ComposerModelPicker
   >["modelOptionsByProvider"];
+  runtimeModel?: ProviderModelDescriptor;
+  runtimeModelsByProvider?: React.ComponentProps<
+    typeof ComposerModelPicker
+  >["runtimeModelsByProvider"];
   effortControl?: "menu" | "slider";
   onProviderModelChange?: React.ComponentProps<typeof ComposerModelPicker>["onProviderModelChange"];
 };
 
 function Harness(props: HarnessProps) {
+  const provider = props.provider ?? "codex";
   const prompt = useComposerThreadDraft(THREAD_ID).prompt;
   const setPrompt = useComposerDraftStore((store) => store.setPrompt);
   const { modelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId: THREAD_ID,
-    selectedProvider: "codex",
+    selectedProvider: provider,
     threadModelSelection: null,
     projectModelSelection: null,
     customModelsByProvider: EMPTY_BY_PROVIDER,
   });
   return (
     <ComposerModelPicker
-      provider="codex"
+      provider={provider}
       model={(selectedModel ?? GPT_5_5) as ModelSlug}
       lockedProvider={props.lockedProvider ?? null}
       effortControl={props.effortControl ?? "menu"}
-      providers={[readyProvider("codex"), readyProvider("claudeAgent")]}
+      providers={props.providers ?? [readyProvider("codex"), readyProvider("claudeAgent")]}
       modelOptionsByProvider={props.modelOptionsByProvider ?? MODEL_OPTIONS_BY_PROVIDER}
+      runtimeModel={props.runtimeModel}
+      {...(props.runtimeModelsByProvider === undefined
+        ? {}
+        : { runtimeModelsByProvider: props.runtimeModelsByProvider })}
       onProviderModelChange={props.onProviderModelChange ?? vi.fn()}
       threadId={THREAD_ID}
-      modelOptions={modelOptions?.codex}
+      modelOptions={modelOptions?.[provider]}
       prompt={prompt}
       onPromptChange={(next) => setPrompt(THREAD_ID, next)}
     />
@@ -102,15 +114,19 @@ async function mountPicker(
   harnessProps: HarnessProps = {},
   options?: CodexModelOptions,
   starred?: ReadonlyArray<StarredModel>,
+  selection?: Parameters<ReturnType<typeof useComposerDraftStore.getState>["setModelSelection"]>[1],
 ) {
   if (starred) {
     localStorage.setItem(STARRED_MODELS_STORAGE_KEY, JSON.stringify(starred));
   }
-  useComposerDraftStore.getState().setModelSelection(THREAD_ID, {
-    provider: "codex",
-    model: GPT_5_5,
-    ...(options ? { options } : {}),
-  });
+  useComposerDraftStore.getState().setModelSelection(
+    THREAD_ID,
+    selection ?? {
+      provider: "codex",
+      model: GPT_5_5,
+      ...(options ? { options } : {}),
+    },
+  );
   const screen = await render(<Harness {...harnessProps} />);
   await page.getByRole("button", { name: "Change model and reasoning" }).click();
   return screen;
@@ -200,7 +216,14 @@ describe("ComposerModelPicker", () => {
         .click();
 
       expect(readStoredStars()).toEqual([
-        { provider: "codex", model: GPT_5_5, effort: "high", fastMode: false, thinking: null },
+        {
+          provider: "codex",
+          model: GPT_5_5,
+          effort: "high",
+          fastMode: false,
+          thinking: null,
+          modelVariant: null,
+        },
       ]);
 
       await page.getByRole("tab", { name: "Starred" }).click();
@@ -213,7 +236,14 @@ describe("ComposerModelPicker", () => {
   it("opens on starred presets and restores model + traits in one click", async () => {
     const onProviderModelChange = vi.fn();
     const screen = await mountPicker({ onProviderModelChange }, { reasoningEffort: "medium" }, [
-      { provider: "codex", model: GPT_5_4, effort: "low", fastMode: true, thinking: null },
+      {
+        provider: "codex",
+        model: GPT_5_4,
+        effort: "low",
+        fastMode: true,
+        thinking: null,
+        modelVariant: null,
+      },
     ]);
     try {
       await expect
@@ -239,7 +269,16 @@ describe("ComposerModelPicker", () => {
         },
       },
       undefined,
-      [{ provider: "codex", model: GPT_5_4, effort: "low", fastMode: null, thinking: null }],
+      [
+        {
+          provider: "codex",
+          model: GPT_5_4,
+          effort: "low",
+          fastMode: null,
+          thinking: null,
+          modelVariant: null,
+        },
+      ],
     );
     try {
       const retired = page.getByRole("menuitem", { name: /GPT-5\.4.*Unavailable/u });
@@ -265,6 +304,7 @@ describe("ComposerModelPicker", () => {
       effort: null,
       fastMode: null,
       thinking: null,
+      modelVariant: null,
     };
     const screen = await mountPicker(
       { onProviderModelChange, modelOptionsByProvider: EMPTY_BY_PROVIDER },
@@ -400,12 +440,108 @@ describe("ComposerModelPicker", () => {
 
   it("keeps a started thread on its provider", async () => {
     const screen = await mountPicker({ lockedProvider: "codex" }, undefined, [
-      { provider: "claudeAgent", model: SONNET, effort: null, fastMode: null, thinking: null },
+      {
+        provider: "claudeAgent",
+        model: SONNET,
+        effort: null,
+        fastMode: null,
+        thinking: null,
+        modelVariant: null,
+      },
     ]);
     try {
       expect(page.getByRole("tab", { name: "Claude" }).elements()).toHaveLength(0);
       await page.getByRole("tab", { name: "Starred" }).click();
       expect(page.getByRole("menuitem", { name: /Claude Sonnet/u }).elements()).toHaveLength(0);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  const FUSION = "fusion" as ModelSlug;
+  const FUSION_DESCRIPTOR: ProviderModelDescriptor = {
+    slug: "fusion",
+    name: "Fusion",
+    modelVariants: [
+      { model: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium" },
+      { model: "fusion-claude-fable-5-1-medium-sidekick-glm-5-2" },
+      { model: "fusion-claude-fable-5-1-medium-fast-sidekick-swe-2-medium" },
+      { model: "fusion-claude-fable-5-1-high-sidekick-swe-2-medium" },
+      { model: "fusion-claude-opus-5-high-sidekick-swe-2-medium" },
+    ],
+  };
+  const DEVIN_OPTIONS: Record<ProviderKind, ReadonlyArray<ProviderModelOption>> = {
+    ...MODEL_OPTIONS_BY_PROVIDER,
+    devin: [
+      { slug: FUSION, name: "Fusion", description: "Dual-agent lead + sidekick" },
+      { slug: "adaptive", name: "Adaptive" },
+    ],
+  };
+
+  it("commits a concrete pairing when a Devin Fusion family is picked", async () => {
+    const onProviderModelChange = vi.fn();
+    const screen = await mountPicker(
+      {
+        provider: "devin",
+        providers: [readyProvider("devin"), readyProvider("codex")],
+        modelOptionsByProvider: DEVIN_OPTIONS,
+        runtimeModelsByProvider: { devin: [FUSION_DESCRIPTOR] },
+        onProviderModelChange,
+      },
+      undefined,
+      undefined,
+      { provider: "devin", model: "adaptive" as ModelSlug },
+    );
+    try {
+      await page.getByRole("menuitem", { name: /^Fusion/u }).click();
+      expect(onProviderModelChange).toHaveBeenCalledWith("devin", FUSION, {
+        modelOptions: {
+          modelVariant: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium",
+        },
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("exposes lead/sidekick pairing controls instead of generic traits", async () => {
+    const screen = await mountPicker(
+      {
+        provider: "devin",
+        providers: [readyProvider("devin")],
+        modelOptionsByProvider: DEVIN_OPTIONS,
+        runtimeModel: FUSION_DESCRIPTOR,
+        runtimeModelsByProvider: { devin: [FUSION_DESCRIPTOR] },
+      },
+      undefined,
+      undefined,
+      {
+        provider: "devin",
+        model: FUSION,
+        options: {
+          modelVariant: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium",
+        },
+      },
+    );
+    try {
+      await expect
+        .element(page.getByRole("menuitem", { name: /^Lead.*Claude Fable 5\.1/u }))
+        .toBeVisible();
+      await expect
+        .element(page.getByRole("menuitem", { name: /^Sidekick.*SWE 2 Medium/u }))
+        .toBeVisible();
+      // Fusion uids carry effort/fast in the pairing itself: no Thinking row.
+      expect(page.getByRole("menuitem", { name: /^Thinking/u }).elements()).toHaveLength(0);
+
+      await page.getByRole("menuitem", { name: /^Sidekick/u }).click();
+      await page.getByRole("menuitemradio", { name: /GLM 5\.2/u }).click();
+
+      expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.devin).toMatchObject({
+        provider: "devin",
+        options: {
+          modelVariant: "fusion-claude-fable-5-1-medium-sidekick-glm-5-2",
+        },
+      });
     } finally {
       await screen.unmount();
     }

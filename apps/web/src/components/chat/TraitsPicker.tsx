@@ -4,6 +4,7 @@
 // Depends on: shared trait resolution helpers, provider model option updates, and shared menu primitives.
 
 import {
+  type DevinModelOptions,
   type OpenCodeModelOptions,
   type ProviderAgentDescriptor,
   type ProviderKind,
@@ -11,6 +12,21 @@ import {
   type ThreadId,
 } from "@synara/contracts";
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  buildDevinFusionCatalog,
+  type DevinFusionChoice,
+  devinFusionChoiceFromUid,
+  devinFusionEffortLabel,
+  devinFusionEffortsFor,
+  devinFusionLeadLabel,
+  devinFusionLeads,
+  devinFusionSidekickLabel,
+  devinFusionSidekicksFor,
+  devinFusionSupportsFast,
+  devinFusionUidForChoice,
+  formatDevinFusionPairLabel,
+  resolveDevinFusionChoice,
+} from "~/lib/devinFusion";
 import { ChevronDownIcon, FastModeIcon, FastModeOutlineIcon, SettingsIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -35,6 +51,7 @@ import {
   supportsComposerFastModeControl,
 } from "./composerTraits";
 import { useComposerTraitCommit } from "./useComposerTraitCommit";
+import { useDevinFusionSelection } from "./useDevinFusionSelection";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ShortcutKbd } from "../ui/shortcut-kbd";
 
@@ -129,6 +146,29 @@ export function resolveTraitsTriggerSummary(options: {
     contextWindowOptions.length > 1 && contextWindow !== defaultContextWindow
       ? (contextWindowOptions.find((option) => option.value === contextWindow)?.label ?? null)
       : null;
+  const fusionCatalog =
+    options.provider === "devin"
+      ? buildDevinFusionCatalog(options.runtimeModel?.modelVariants)
+      : null;
+  if (fusionCatalog !== null) {
+    const fusionChoice = resolveDevinFusionChoice(
+      fusionCatalog,
+      devinFusionChoiceFromUid(
+        (options.modelOptions as DevinModelOptions | undefined)?.modelVariant,
+      ),
+    );
+    const fusionLabel = fusionChoice
+      ? formatDevinFusionPairLabel(devinFusionUidForChoice(fusionChoice))
+      : null;
+    const summary = fusionLabel ? (fusionChoice?.fast ? `${fusionLabel} · Fast` : fusionLabel) : "";
+    return {
+      contextWindowLabel: null,
+      primaryLabel: fusionLabel,
+      showsFastBadge: fusionChoice?.fast ?? false,
+      summaryText: summary,
+    };
+  }
+
   const agentOptions = getAgentOptions(options.provider, options.runtimeAgents);
   const selectedAgent = getSelectedAgentValue(options.provider, options.modelOptions);
   const agentLabel = findAgentLabel(agentOptions, selectedAgent);
@@ -344,6 +384,13 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     thinkingEnabled !== null || effortLevels.length > 0 || contextWindowOptions.length > 1;
 
   const commitTraitOptions = useComposerTraitCommit({ threadId, provider, model, modelOptions });
+  const fusion = useDevinFusionSelection({
+    provider,
+    threadId,
+    model,
+    modelOptions,
+    runtimeModel,
+  });
   // Commit a trait change and close the menu. Every section funnels here; the
   // fast-mode header toggle passes `keepMenuOpen` so its state flip stays visible.
   const commitTrait = useCallback(
@@ -370,6 +417,82 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     }
     commitTrait(plan.patch);
   };
+
+  // Devin Fusion replaces the generic trait sections with one section per uid
+  // dimension (lead, lead effort, sidekick, fast tier). Sections stay open so
+  // the four fields can be composed without reopening the menu.
+  if (fusion !== null) {
+    const fusionSidekicks = devinFusionSidekicksFor(
+      fusion.catalog,
+      fusion.choice.lead,
+      fusion.choice.effort,
+      fusion.choice.fast,
+    );
+    const recommendedSidekick = fusionSidekicks.includes("swe-2-medium") ? "swe-2-medium" : null;
+    const fusionSection = (
+      label: string,
+      value: string,
+      options: ReadonlyArray<TraitRadioOption>,
+      patch: (value: string) => Partial<DevinFusionChoice>,
+    ) => (
+      <TraitRadioSection
+        label={label}
+        value={value}
+        options={options}
+        onValueChange={(next) => fusion.commitChoice(patch(next))}
+      />
+    );
+    return (
+      <>
+        {fusionSection(
+          "Lead",
+          fusion.choice.lead,
+          devinFusionLeads(fusion.catalog).map((lead) => ({
+            value: lead,
+            label: devinFusionLeadLabel(lead),
+          })),
+          (value) => ({ lead: value }),
+        )}
+        <MenuDivider />
+        {fusionSection(
+          "Effort",
+          fusion.choice.effort,
+          devinFusionEffortsFor(fusion.catalog, fusion.choice.lead).map((effort) => ({
+            value: effort,
+            label: devinFusionEffortLabel(effort),
+          })),
+          (value) => ({ effort: value }),
+        )}
+        <MenuDivider />
+        {fusionSection(
+          "Sidekick",
+          fusion.choice.sidekick,
+          fusionSidekicks.map((sidekick) => ({
+            value: sidekick,
+            label:
+              sidekick === recommendedSidekick
+                ? `${devinFusionSidekickLabel(sidekick)} (recommended)`
+                : devinFusionSidekickLabel(sidekick),
+          })),
+          (value) => ({ sidekick: value }),
+        )}
+        {devinFusionSupportsFast(fusion.catalog, fusion.choice.lead, fusion.choice.effort) ? (
+          <>
+            <MenuDivider />
+            {fusionSection(
+              "Speed",
+              fusion.choice.fast ? "on" : "off",
+              [
+                { value: "off", label: "Standard", isDefault: true },
+                { value: "on", label: "Fast" },
+              ],
+              (value) => ({ fast: value === "on" }),
+            )}
+          </>
+        ) : null}
+      </>
+    );
+  }
 
   if (!hasVisibleControls && !hasAgentControls) {
     return null;
@@ -547,8 +670,10 @@ export const TraitsPicker = memo(function TraitsPicker({
   const agentOptions = getAgentOptions(provider, runtimeAgents);
   const defaultAgent = defaultAgentForProvider(provider);
   const hasAgentControls = agentOptions.length > 0 && defaultAgent !== null;
+  const hasFusionControls =
+    provider === "devin" && buildDevinFusionCatalog(runtimeModel?.modelVariants) !== null;
 
-  if (!hasVisibleControls && !hasAgentControls) {
+  if (!hasVisibleControls && !hasAgentControls && !hasFusionControls) {
     return null;
   }
 

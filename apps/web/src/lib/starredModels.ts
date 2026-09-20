@@ -20,6 +20,9 @@ export const StarredModelSchema = Schema.Struct({
   effort: Schema.NullOr(Schema.String),
   fastMode: Schema.NullOr(Schema.Boolean),
   thinking: Schema.NullOr(Schema.Boolean),
+  // Concrete provider variant uid (e.g. a Devin Fusion pairing). Absent on
+  // presets written before variant pinning existed.
+  modelVariant: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export const StarredModelsSchema = Schema.Array(StarredModelSchema);
 
@@ -29,12 +32,16 @@ export interface StarredModel {
   readonly effort: string | null;
   readonly fastMode: boolean | null;
   readonly thinking: boolean | null;
+  readonly modelVariant: string | null;
 }
 
 export type StoredStarredModel = typeof StarredModelSchema.Type;
 
 export function starredModelKey(
-  entry: Pick<StoredStarredModel, "provider" | "model" | "effort" | "fastMode" | "thinking">,
+  entry: Pick<
+    StoredStarredModel,
+    "provider" | "model" | "effort" | "fastMode" | "thinking" | "modelVariant"
+  >,
 ): string {
   // JSON keeps the key unambiguous: model slugs may contain any separator character.
   return JSON.stringify([
@@ -43,6 +50,7 @@ export function starredModelKey(
     entry.effort ?? "",
     entry.fastMode === null ? "" : String(entry.fastMode),
     entry.thinking === null ? "" : String(entry.thinking),
+    entry.modelVariant ?? "",
   ]);
 }
 
@@ -58,7 +66,7 @@ export function normalizeStarredModels(
     const key = starredModelKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ ...entry, provider: entry.provider });
+    result.push({ ...entry, provider: entry.provider, modelVariant: entry.modelVariant ?? null });
   }
   return result;
 }
@@ -86,6 +94,7 @@ export function seedStarredModelsFromLegacyFavorites(): StoredStarredModel[] {
       effort: null,
       fastMode: null,
       thinking: null,
+      modelVariant: null,
     })),
   );
 }

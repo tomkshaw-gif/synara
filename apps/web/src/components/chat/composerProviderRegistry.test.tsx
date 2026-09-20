@@ -321,6 +321,55 @@ describe("getComposerProviderState", () => {
     expect(state.modelOptionsForDispatch).toEqual({ modelVariant: "custom-concrete-model" });
   });
 
+  it("dispatches a Devin Fusion pairing as modelVariant only", () => {
+    const state = getComposerProviderState({
+      provider: "devin",
+      model: "fusion",
+      runtimeModel: {
+        slug: "fusion",
+        name: "Fusion",
+        modelVariants: [
+          { model: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium" },
+          { model: "fusion-claude-opus-5-high-sidekick-glm-5-2" },
+        ],
+      },
+      prompt: "",
+      modelOptions: {
+        devin: {
+          reasoningEffort: "low",
+          fastMode: true,
+          modelVariant: "fusion-claude-opus-5-high-sidekick-glm-5-2",
+        },
+      },
+    });
+
+    expect(state.modelOptionsForDispatch).toEqual({
+      modelVariant: "fusion-claude-opus-5-high-sidekick-glm-5-2",
+    });
+  });
+
+  it("resolves a bare Devin Fusion family to its default pairing at dispatch", () => {
+    const state = getComposerProviderState({
+      provider: "devin",
+      model: "fusion",
+      runtimeModel: {
+        slug: "fusion",
+        name: "Fusion",
+        modelVariants: [
+          { model: "fusion-claude-fable-5-1-medium-fast-sidekick-swe-2-medium" },
+          { model: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium" },
+          { model: "fusion-claude-opus-5-high-sidekick-glm-5-2" },
+        ],
+      },
+      prompt: "",
+      modelOptions: { devin: { fastMode: true } },
+    });
+
+    expect(state.modelOptionsForDispatch).toEqual({
+      modelVariant: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium",
+    });
+  });
+
   it("resolves Devin static SWE fast mode to a concrete variant", () => {
     const state = getComposerProviderState({
       provider: "devin",

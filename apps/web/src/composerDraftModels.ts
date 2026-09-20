@@ -513,6 +513,13 @@ export function reconcileProviderScopedModelSelection(
         : undefined,
     );
   }
+  if (current.provider === "devin") {
+    // Devin traits are portable across families, but a variant uid is
+    // family-scoped — a Fusion pairing must not leak into another family.
+    const { modelVariant: _modelVariant, ...rest } = current.options ?? {};
+    const preservedDevinOptions = Object.keys(rest).length > 0 ? rest : undefined;
+    return makeModelSelection(requested.provider, requested.model, preservedDevinOptions);
+  }
   if (
     current.provider !== "codex" &&
     current.provider !== "cursor" &&

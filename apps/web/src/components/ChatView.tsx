@@ -6,6 +6,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ThreadId,
   type AutomationDefinition,
+  type DevinModelOptions,
   type EditorId,
   type ModelSelection,
   type ModelSlug,
@@ -53,6 +54,7 @@ import { useRepoDiffTotals } from "~/hooks/useRepoDiffTotals";
 import { useThreadRecap } from "~/hooks/useThreadRecap";
 import { SINGLE_CHAT_PANE_SCOPE_ID } from "~/lib/chatPaneScope";
 import { formatComposerMentionToken } from "~/lib/composerMentions";
+import { devinFusionFastModePatch } from "~/lib/devinFusion";
 import {
   GIT_WORKING_TREE_DIFF_LIVE_REFETCH_INTERVAL_MS,
   gitBranchesQueryOptions,
@@ -4190,12 +4192,26 @@ export default function ChatView({
       scheduleComposerFocus();
       return;
     }
+    const nextFastMode = !composerTraitSelection.fastModeEnabled;
+    // Fusion encodes its fast tier inside the pairing uid; a generic
+    // `fastMode` trait would be stripped at dispatch and do nothing.
+    const fusionPatch =
+      selectedProvider === "devin"
+        ? devinFusionFastModePatch({
+            modelVariants: selectedRuntimeModel?.modelVariants,
+            modelVariant: (selectedProviderModelOptions as DevinModelOptions | undefined)
+              ?.modelVariant,
+            fast: nextFastMode,
+          })
+        : null;
     setComposerDraftProviderModelOptions(
       threadId,
       selectedProvider,
-      buildNextProviderOptions(selectedProvider, selectedProviderModelOptions, {
-        fastMode: !composerTraitSelection.fastModeEnabled,
-      }),
+      buildNextProviderOptions(
+        selectedProvider,
+        selectedProviderModelOptions,
+        fusionPatch ?? { fastMode: nextFastMode },
+      ),
       { persistSticky: true },
     );
     scheduleComposerFocus();
@@ -4205,6 +4221,7 @@ export default function ChatView({
     scheduleComposerFocus,
     selectedProvider,
     selectedProviderModelOptions,
+    selectedRuntimeModel,
     setComposerDraftProviderModelOptions,
     threadId,
   ]);
@@ -4307,6 +4324,7 @@ export default function ChatView({
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
+    selectedRuntimeModel,
     environmentMode: envMode ?? null,
     runtimeMode,
     interactionMode,

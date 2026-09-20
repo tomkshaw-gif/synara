@@ -180,6 +180,33 @@ describe("composerDraftStore modelSelection", () => {
     ).toEqual(modelSelection("devin", "adaptive", { fastMode: true }));
   });
 
+  it("drops a Devin Fusion pairing when the family changes but keeps other traits", () => {
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(
+      threadId,
+      modelSelection("devin", "fusion", {
+        reasoningEffort: "high",
+        modelVariant: "fusion-claude-opus-5-high-sidekick-swe-2-medium",
+      }),
+    );
+    store.setModelSelection(threadId, modelSelection("devin", "adaptive"));
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider.devin,
+    ).toEqual(modelSelection("devin", "adaptive", { reasoningEffort: "high" }));
+  });
+
+  it("keeps a Devin Fusion pairing while the family stays the same", () => {
+    const store = useComposerDraftStore.getState();
+    const pairing = "fusion-claude-opus-5-high-sidekick-swe-2-medium";
+    store.setModelSelection(threadId, modelSelection("devin", "fusion", { modelVariant: pairing }));
+    store.setModelSelection(threadId, modelSelection("devin", "fusion"));
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider.devin,
+    ).toEqual(modelSelection("devin", "fusion", { modelVariant: pairing }));
+  });
+
   it("keeps default-only model selections on the draft", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(threadId, modelSelection("codex", "gpt-5.4"));

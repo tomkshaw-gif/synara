@@ -18,6 +18,7 @@ import type { DevinAcpRuntimeInput } from "../acp/DevinAcpSupport.ts";
 import type { AcpParsedSessionEvent } from "../acp/AcpRuntimeModel.ts";
 import { DevinAdapter } from "../Services/DevinAdapter.ts";
 import {
+  applyDevinAcpModelSelection,
   applyDevinSessionConfiguration,
   buildDevinPromptMeta,
   buildDevinStaticModelDescriptors,
@@ -1136,6 +1137,128 @@ describe("applyDevinSessionConfiguration", () => {
   });
 });
 
+describe("applyDevinAcpModelSelection", () => {
+  const devinModelConfigOption = {
+    id: "model",
+    name: "Model",
+    category: "model",
+    type: "select",
+    currentValue: "adaptive",
+    options: [
+      { value: "adaptive", name: "Adaptive" },
+      { value: "swe-1-7", name: "SWE-1.7" },
+      { value: "fusion-claude-opus-5-high-sidekick-swe-2-medium", name: "Fusion" },
+    ],
+  } satisfies Acp.SessionConfigOption;
+
+  function makeModelConfigRuntime(
+    configOptions: ReadonlyArray<Acp.SessionConfigOption> | undefined,
+  ) {
+    const calls: Array<{ method: string; args: ReadonlyArray<unknown> }> = [];
+    const runtime = {
+      getConfigOptions:
+        configOptions === undefined
+          ? Effect.fail(
+              new AcpTransportError({
+                detail: "unsupported",
+                cause: new Error("unsupported"),
+              }),
+            )
+          : Effect.succeed(configOptions),
+      setModel: (value: string) =>
+        Effect.sync(() => {
+          calls.push({ method: "setModel", args: [value] });
+        }),
+    };
+    return { runtime, calls };
+  }
+
+  it("applies an advertised Fusion pairing through the model option", async () => {
+    const { runtime, calls } = makeModelConfigRuntime([devinModelConfigOption]);
+
+    await Effect.runPromise(
+      applyDevinAcpModelSelection({
+        runtime,
+        model: "fusion-claude-opus-5-high-sidekick-swe-2-medium",
+      }),
+    );
+
+    expect(calls).toEqual([
+      { method: "setModel", args: ["fusion-claude-opus-5-high-sidekick-swe-2-medium"] },
+    ]);
+  });
+
+  it("skips unadvertised non-Fusion values so the spawn flag keeps working", async () => {
+    const { runtime, calls } = makeModelConfigRuntime([devinModelConfigOption]);
+
+    await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: "claude-opus-5" }));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("fails closed for a Fusion pairing the session does not advertise", async () => {
+    const { runtime, calls } = makeModelConfigRuntime([devinModelConfigOption]);
+
+    await expect(
+      Effect.runPromise(
+        applyDevinAcpModelSelection({
+          runtime,
+          model: "fusion-retired-9-medium-sidekick-swe-9",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "ProviderAdapterValidationError",
+      operation: "applyDevinAcpModelSelection",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("no-ops when the session does not advertise a model config option", async () => {
+    const { runtime, calls } = makeModelConfigRuntime([]);
+
+    await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: "swe-1-7" }));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("no-ops when config options are unavailable on older CLIs", async () => {
+    const { runtime, calls } = makeModelConfigRuntime(undefined);
+
+    await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: "swe-1-7" }));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("flattens grouped select options before checking advertised values", async () => {
+    const groupedOption = {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: "adaptive",
+      options: [
+        {
+          group: "fusion",
+          name: "Fusion",
+          options: [{ value: "fusion-gpt-6-astra-high-sidekick-glm-5-2", name: "GPT-6 Astra" }],
+        },
+      ],
+    } satisfies Acp.SessionConfigOption;
+    const { runtime, calls } = makeModelConfigRuntime([groupedOption]);
+
+    await Effect.runPromise(
+      applyDevinAcpModelSelection({
+        runtime,
+        model: "fusion-gpt-6-astra-high-sidekick-glm-5-2",
+      }),
+    );
+
+    expect(calls).toEqual([
+      { method: "setModel", args: ["fusion-gpt-6-astra-high-sidekick-glm-5-2"] },
+    ]);
+  });
+});
+
 describe("resolveRequestedModeId", () => {
   const devin300067Modes = [
     { id: "accept-edits", name: "Code" },
@@ -1490,6 +1613,57 @@ describe("resolveDevinStartModel", () => {
     );
 
     expect(effectiveModel).toBe("gpt-5-6-sol-high");
+  });
+
+  it("resolves a bare Fusion family selection to the default pairing", async () => {
+    const effectiveModel = await Effect.runPromise(
+      resolveDevinStartModel({
+        explicitModel: undefined,
+        modelSelection: { model: "fusion" },
+        discoverModels: () =>
+          Effect.succeed({
+            source: "devin-cli",
+            cached: false,
+            models: [
+              {
+                slug: "fusion",
+                name: "Fusion",
+                modelVariants: [
+                  { model: "fusion-claude-fable-5-1-medium-fast-sidekick-swe-2-medium" },
+                  { model: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium" },
+                  { model: "fusion-claude-opus-5-high-sidekick-swe-2-medium" },
+                ],
+              },
+            ],
+          }),
+      }),
+    );
+
+    expect(effectiveModel).toBe("fusion-claude-fable-5-1-medium-sidekick-swe-2-medium");
+  });
+
+  it("preserves an exact Fusion pairing through discovery", async () => {
+    const pairing = "fusion-claude-opus-5-high-sidekick-glm-5-2";
+    const effectiveModel = await Effect.runPromise(
+      resolveDevinStartModel({
+        explicitModel: undefined,
+        modelSelection: { model: "fusion", options: { modelVariant: pairing } },
+        discoverModels: () =>
+          Effect.succeed({
+            source: "devin-cli",
+            cached: false,
+            models: [
+              {
+                slug: "fusion",
+                name: "Fusion",
+                modelVariants: [{ model: pairing }],
+              },
+            ],
+          }),
+      }),
+    );
+
+    expect(effectiveModel).toBe(pairing);
   });
 });
 

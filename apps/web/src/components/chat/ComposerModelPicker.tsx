@@ -6,6 +6,7 @@
 //   model storage, and shared menu primitives.
 
 import {
+  type DevinModelOptions,
   type ModelSlug,
   type ProviderAgentDescriptor,
   type ProviderKind,
@@ -14,6 +15,7 @@ import {
   type ServerProviderStatus,
   type ThreadId,
 } from "@synara/contracts";
+import { parseDevinFusionModelUid } from "@synara/shared/model";
 import {
   useDeferredValue,
   useEffect,
@@ -26,6 +28,11 @@ import {
 import { appHistory } from "../../appNavigation";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useStarredModels } from "../../hooks/useStarredModels";
+import {
+  buildDevinFusionCatalog,
+  devinFusionNormalizePatch,
+  formatDevinFusionPairLabel,
+} from "~/lib/devinFusion";
 import {
   buildNextProviderOptions,
   type ProviderModelOption,
@@ -240,6 +247,24 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     props.runtimeModel,
   );
 
+  // A Fusion selection's meaningful state is its pairing uid; the trigger shows
+  // the lead+sidekick summary instead of a generic effort label.
+  const currentDevinModelVariant =
+    props.provider === "devin"
+      ? (props.modelOptions as DevinModelOptions | undefined)?.modelVariant
+      : undefined;
+  const fusionCatalog =
+    props.provider === "devin" ? buildDevinFusionCatalog(props.runtimeModel?.modelVariants) : null;
+  const fusionPairLabel =
+    fusionCatalog !== null
+      ? (formatDevinFusionPairLabel(currentDevinModelVariant) ??
+        formatDevinFusionPairLabel(fusionCatalog.pairs[0]?.uid))
+      : null;
+  const currentFusionVariant =
+    fusionCatalog !== null && parseDevinFusionModelUid(currentDevinModelVariant) !== null
+      ? currentDevinModelVariant
+      : null;
+
   const providerTabs = resolveComposerModelPickerProviderTabs(
     resolveVisibleProviderOptions({
       provider: props.provider,
@@ -260,7 +285,17 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           current: {
             provider: activeProvider,
             model: props.model,
-            ...resolveStarredTraits(currentTraitSelection),
+            ...resolveStarredTraits(
+              fusionCatalog !== null
+                ? {
+                    ...currentTraitSelection,
+                    effortLevels: [],
+                    fastModeDescriptor: null,
+                    thinkingEnabled: null,
+                  }
+                : currentTraitSelection,
+              { modelVariant: currentFusionVariant },
+            ),
           },
           effortLevelsFor: (provider, model) => traitSelectionFor(provider, model).effortLevels,
         })
@@ -272,6 +307,30 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         });
   const starredKeySet = new Set(starredModels.map(starredModelKey));
 
+  // Devin patches normalize per family before merging: a Fusion family pick
+  // must carry a concrete pairing uid (a bare `fusion` slug resolves to an
+  // arbitrary pairing at spawn), and a non-Fusion family must never inherit a
+  // pairing uid through the options merge. Covers plain picks, effort side
+  // block commits, and starred applies alike.
+  const normalizeDevinPatch = (
+    provider: ProviderKind,
+    model: string,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> => {
+    if (provider !== "devin") return patch;
+    return devinFusionNormalizePatch({
+      catalog: buildDevinFusionCatalog(
+        resolveRuntimeModelDescriptor({
+          provider,
+          model,
+          runtimeModels: props.runtimeModelsByProvider?.[provider],
+        })?.modelVariants,
+      ),
+      patch,
+      currentVariant: (providerOptionsFor(provider) as DevinModelOptions | undefined)?.modelVariant,
+    });
+  };
+
   // Commit a row: `patch` carries the traits to apply on top of the provider's options.
   // `keepOpen` leaves the panel up so the footer slider can tune the model just picked.
   const commitRow = (
@@ -280,12 +339,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     patch: Record<string, unknown>,
     keepOpen = false,
   ) => {
-    if (Object.keys(patch).length > 0) {
+    const normalizedPatch = normalizeDevinPatch(row.provider, model, patch);
+    if (Object.keys(normalizedPatch).length > 0) {
       props.onProviderModelChange(row.provider, model, {
         modelOptions: buildNextProviderOptions(
           row.provider,
           providerOptionsFor(row.provider),
-          patch,
+          normalizedPatch,
         ),
       });
     } else {
@@ -381,7 +441,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       <ComposerModelMenuTrigger
         provider={activeProvider}
         modelLabel={modelLabel}
-        statusLabel={resolveComposerTraitStatusLabel(currentTraitSelection)}
+        statusLabel={fusionPairLabel ?? resolveComposerTraitStatusLabel(currentTraitSelection)}
         contextWindowLabel={activeProvider === "claudeAgent" ? props.contextWindowLabel : null}
         showsFastBadge={showsComposerFastModeBadge(currentTraitSelection)}
         hideModelLabel={props.hideModelLabel}

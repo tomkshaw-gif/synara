@@ -15,6 +15,7 @@ import {
 import {
   applyClaudePromptEffortPrefix,
   claudeSelectionRequiresRestart,
+  composeDevinFusionModelUid,
   formatModelDisplayName,
   getClaudeContextWindowSuffix,
   getDefaultAutoCompactWindow,
@@ -34,6 +35,7 @@ import {
   normalizeModelSlug,
   normalizePiModelOptions,
   parseCursorCliReasoningEffort,
+  parseDevinFusionModelUid,
   resolveApiModelId,
   resolveDevinModelVariant,
   resolveSelectableModel,
@@ -126,6 +128,155 @@ describe("resolveDevinModelVariant", () => {
       }),
     ).toBeUndefined();
   });
+
+  const FUSION_VARIANTS = [
+    { model: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium" },
+    { model: "fusion-claude-fable-5-1-medium-fast-sidekick-swe-2-medium" },
+    { model: "fusion-claude-opus-5-high-sidekick-swe-2-medium" },
+    { model: "fusion-claude-opus-5-high-sidekick-glm-5-2" },
+  ];
+
+  it("keeps an explicit Fusion pairing over stale trait options", () => {
+    expect(
+      resolveDevinModelVariant({
+        model: "fusion",
+        modelVariant: "fusion-claude-opus-5-high-sidekick-glm-5-2",
+        reasoningEffort: "low",
+        fastMode: false,
+        runtimeModel: { slug: "fusion", name: "Fusion", modelVariants: FUSION_VARIANTS },
+      }),
+    ).toBe("fusion-claude-opus-5-high-sidekick-glm-5-2");
+  });
+
+  it("returns a stale Fusion pairing unchanged so startup can fail closed", () => {
+    expect(
+      resolveDevinModelVariant({
+        model: "fusion",
+        modelVariant: "fusion-retired-9-medium-sidekick-swe-9",
+        reasoningEffort: "medium",
+        runtimeModel: { slug: "fusion", name: "Fusion", modelVariants: FUSION_VARIANTS },
+      }),
+    ).toBe("fusion-retired-9-medium-sidekick-swe-9");
+  });
+
+  it("resolves a bare Fusion family slug to the non-fast medium SWE-2 pairing", () => {
+    expect(
+      resolveDevinModelVariant({
+        model: "fusion",
+        runtimeModel: { slug: "fusion", name: "Fusion", modelVariants: FUSION_VARIANTS },
+      }),
+    ).toBe("fusion-claude-fable-5-1-medium-sidekick-swe-2-medium");
+  });
+
+  it("falls back to the first advertised pairing when no preferred pairing exists", () => {
+    expect(
+      resolveDevinModelVariant({
+        model: "fusion",
+        runtimeModel: {
+          slug: "fusion",
+          name: "Fusion",
+          modelVariants: [{ model: "fusion-gpt-6-astra-high-sidekick-glm-5-2" }],
+        },
+      }),
+    ).toBe("fusion-gpt-6-astra-high-sidekick-glm-5-2");
+  });
+
+  it("resolves a concrete Fusion uid passed as the model slug to itself", () => {
+    expect(
+      resolveDevinModelVariant({
+        model: "fusion-claude-opus-5-high-sidekick-glm-5-2",
+        runtimeModel: { slug: "fusion", name: "Fusion", modelVariants: FUSION_VARIANTS },
+      }),
+    ).toBe("fusion-claude-opus-5-high-sidekick-glm-5-2");
+  });
+
+  it("still recomputes non-Fusion variants from traits before checking the model slug", () => {
+    expect(
+      resolveDevinModelVariant({
+        model: "gpt-5-6-sol-high",
+        fastMode: true,
+        runtimeModel: {
+          slug: "gpt-5.6-sol",
+          name: "GPT-5.6 Sol",
+          modelVariants: [
+            { model: "gpt-5-6-sol-high", reasoningEffort: "high", fastMode: false },
+            { model: "gpt-5-6-sol-high-priority", reasoningEffort: "high", fastMode: true },
+          ],
+        },
+      }),
+    ).toBe("gpt-5-6-sol-high-priority");
+  });
+});
+
+describe("parseDevinFusionModelUid", () => {
+  it("parses lead, effort, fast, and sidekick structurally", () => {
+    expect(parseDevinFusionModelUid("fusion-claude-opus-5-high-sidekick-swe-2-medium")).toEqual({
+      lead: "claude-opus-5",
+      leadEffort: "high",
+      fast: false,
+      sidekick: "swe-2-medium",
+      sidekickPriority: false,
+    });
+  });
+
+  it("reads the fast marker from the lead segment and priority from the sidekick", () => {
+    expect(
+      parseDevinFusionModelUid("fusion-gpt-5-6-sol-xhigh-fast-sidekick-glm-5-2-priority"),
+    ).toEqual({
+      lead: "gpt-5-6-sol",
+      leadEffort: "xhigh",
+      fast: true,
+      sidekick: "glm-5-2",
+      sidekickPriority: true,
+    });
+  });
+
+  it("does not let the sidekick effort token shadow the lead effort", () => {
+    expect(
+      parseDevinFusionModelUid("fusion-claude-opus-5-xhigh-sidekick-swe-2-medium")?.leadEffort,
+    ).toBe("xhigh");
+  });
+
+  it.each([
+    "fusion",
+    "claude-opus-5",
+    "fusion-sidekick-swe-2-medium",
+    "swe-1-7-lightning",
+    null,
+    undefined,
+  ])("rejects %s", (value) => {
+    expect(parseDevinFusionModelUid(value)).toBeNull();
+  });
+});
+
+describe("composeDevinFusionModelUid", () => {
+  it("round-trips through the parser", () => {
+    const uid = composeDevinFusionModelUid({
+      lead: "claude-fable-5-1",
+      leadEffort: "medium",
+      sidekick: "swe-2-medium",
+    });
+    expect(uid).toBe("fusion-claude-fable-5-1-medium-sidekick-swe-2-medium");
+    expect(parseDevinFusionModelUid(uid)).toEqual({
+      lead: "claude-fable-5-1",
+      leadEffort: "medium",
+      fast: false,
+      sidekick: "swe-2-medium",
+      sidekickPriority: false,
+    });
+  });
+
+  it("encodes the fast and priority markers", () => {
+    expect(
+      composeDevinFusionModelUid({
+        lead: "gpt-6-astra",
+        leadEffort: "high",
+        fast: true,
+        sidekick: "gpt-5-6-luna",
+        sidekickPriority: true,
+      }),
+    ).toBe("fusion-gpt-6-astra-high-fast-sidekick-gpt-5-6-luna-priority");
+  });
 });
 
 describe("normalizeModelSlug", () => {
@@ -169,6 +320,9 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("grok-4.6", "grok")).toBe("grok-4.6");
     expect(normalizeModelSlug("Vendor/ModelCase-MEDIUM", "devin")).toBe("Vendor/ModelCase-MEDIUM");
     expect(normalizeModelSlug("swe-1-7-medium", "devin")).toBe("swe-1-7");
+    expect(normalizeModelSlug("fusion-claude-opus-5-medium-sidekick-swe-2-medium", "devin")).toBe(
+      "fusion-claude-opus-5-medium-sidekick-swe-2-medium",
+    );
   });
 
   it("resolves devin aliases to canonical swe-1-6 / swe-1-7 slugs", () => {

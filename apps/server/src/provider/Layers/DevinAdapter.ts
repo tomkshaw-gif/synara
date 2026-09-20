@@ -36,6 +36,7 @@ import {
   getProviderOptionDescriptors,
   humanizeModelSlug,
   normalizeModelSlug,
+  parseDevinFusionModelUid,
   resolveDevinModelVariant,
   trimOrNull,
 } from "@synara/shared/model";
@@ -122,6 +123,7 @@ import {
   type AcpSessionMode,
   type AcpSessionModeState,
   type AcpToolCallState,
+  collectSessionConfigOptionValues,
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import {
@@ -647,6 +649,62 @@ export function applyDevinSessionConfiguration(input: {
   });
 }
 
+/**
+ * Re-asserts the resolved model on the live ACP session. `devin acp --model`
+ * accepts fuzzy names: family slugs land on the CLI's default variant
+ * (`--model fusion` picks the first pairing) and unrecognized values are
+ * silently ignored. Applying the concrete uid through the model config option
+ * — the same channel `/model` uses — pins the exact variant. Values that are
+ * not advertised stay on the spawn flag, except Fusion pairings, which fail
+ * fast instead of silently running a different lead/sidekick pair. Sessions on
+ * older CLIs without a model config option keep spawn-flag behavior.
+ */
+export function applyDevinAcpModelSelection(input: {
+  readonly runtime: Pick<AcpSessionRuntimeShape, "getConfigOptions" | "setModel">;
+  readonly model: string | undefined;
+}): Effect.Effect<void, ProviderAdapterError> {
+  return Effect.gen(function* () {
+    const model = trimOrNull(input.model);
+    if (model === null) {
+      return;
+    }
+    const configOptions = yield* input.runtime.getConfigOptions.pipe(
+      Effect.timeoutOption(5_000),
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
+    );
+    if (configOptions === undefined) {
+      return;
+    }
+    const modelOption = configOptions.find(
+      (option) => option.type === "select" && option.category === "model",
+    );
+    if (!modelOption) {
+      return;
+    }
+    if (!collectSessionConfigOptionValues(modelOption).includes(model)) {
+      if (parseDevinFusionModelUid(model) === null) {
+        return;
+      }
+      return yield* new ProviderAdapterValidationError({
+        provider: PROVIDER,
+        operation: "applyDevinAcpModelSelection",
+        issue: `Devin no longer offers the requested Fusion pairing '${model}'. Refresh the model list and choose an available pairing.`,
+      });
+    }
+    yield* input.runtime.setModel(model).pipe(
+      Effect.mapError(
+        (error) =>
+          new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "applyDevinAcpModelSelection",
+            issue: `Failed to apply Devin model '${model}' on the ACP session: ${error.message}`,
+          }),
+      ),
+    );
+  });
+}
+
 export function scopeDevinRuntimeItemIdForTurn(turnId: TurnId, itemId: string): string {
   return scopeAcpRuntimeItemIdForTurn(PROVIDER, turnId, itemId);
 }
@@ -911,6 +969,10 @@ function formatDevinContextWindow(value: number | undefined, model: string): str
 }
 
 function inferDevinReasoningEffort(variant: DevinModelVariantSeed): string | undefined {
+  // Fusion uids encode the lead's effort inside the pairing; reading the whole
+  // uid would let the sidekick's effort tokens (e.g. swe-2-medium) shadow it.
+  const fusion = parseDevinFusionModelUid(variant.model);
+  if (fusion) return fusion.leadEffort;
   const haystack = `${variant.model} ${variant.label ?? ""}`.toLowerCase().replace(/[_.-]+/gu, " ");
   if (/\b(?:no thinking|none|off)\b/u.test(haystack)) return "none";
   if (/\bminimal\b/u.test(haystack)) return "minimal";
@@ -923,6 +985,8 @@ function inferDevinReasoningEffort(variant: DevinModelVariantSeed): string | und
 }
 
 function isDevinFastVariant(variant: DevinModelVariantSeed): boolean {
+  const fusion = parseDevinFusionModelUid(variant.model);
+  if (fusion) return fusion.fast;
   const haystack = `${variant.model} ${variant.label ?? ""}`.toLowerCase();
   return (
     /\b(?:fast|lightning)\b/u.test(haystack) || /(?:^|[-_])priority(?:$|[-_])/u.test(variant.model)
@@ -930,6 +994,7 @@ function isDevinFastVariant(variant: DevinModelVariantSeed): boolean {
 }
 
 function isDevinThinkingVariant(variant: DevinModelVariantSeed): boolean {
+  if (parseDevinFusionModelUid(variant.model) !== null) return false;
   const haystack = `${variant.model} ${variant.label ?? ""}`.toLowerCase().replace(/[_.-]+/gu, " ");
   return (
     /\bthinking\b/u.test(haystack) &&
@@ -1161,11 +1226,17 @@ export function resolveDevinStartModel<E, R>(input: {
 }): Effect.Effect<string | undefined, E | ProviderAdapterValidationError, R> {
   const modelSelection = input.modelSelection;
   const options = modelSelection?.options;
+  // A Fusion selection needs the discovered variant catalog to pin a concrete
+  // pairing uid — either the explicit `modelVariant` or, for a bare `fusion`
+  // family slug, the family's deterministic default pairing.
   const traitsNeedResolution =
     trimOrNull(options?.reasoningEffort) !== null ||
     options?.fastMode !== undefined ||
     options?.thinking !== undefined ||
-    trimOrNull(options?.contextWindow) !== null;
+    trimOrNull(options?.contextWindow) !== null ||
+    trimOrNull(options?.modelVariant) !== null ||
+    modelSelection?.model === "fusion" ||
+    parseDevinFusionModelUid(modelSelection?.model) !== null;
   const resolveVariant = (runtimeModel?: ProviderModelDescriptor) =>
     resolveDevinModelVariant({
       model: modelSelection?.model,
@@ -2357,6 +2428,13 @@ export function makeDevinAdapter(
               runtime: acp,
               runtimeMode: input.runtimeMode,
               interactionMode: undefined,
+            });
+            // `--model` is fuzzy at spawn; pin the resolved uid through the
+            // session's model config option so Fusion pairings and other
+            // concrete variants apply exactly as selected.
+            yield* applyDevinAcpModelSelection({
+              runtime: acp,
+              model: effectiveModel,
             });
             // Startup configuration has settled; turns gated on this deferred
             // can now prompt. Devin model options are process-start settings.

@@ -208,6 +208,25 @@ allows Artifacts. While Artifacts are off or unavailable, the composer marks bot
 warning that explains what is missing. Published pages are hosted on claude.ai; Claude returns the
 link in its reply.
 
+### Devin `/handoff`
+
+The Devin CLI's [`/handoff`](https://docs.devin.ai/cli/handoff) command is implemented in the CLI's
+interactive frontend, not in the `devin acp` server Synara hosts. It is not advertised through ACP
+`available_commands`, and there is no `session/handoff` extension method or hidden subcommand.
+Sending `/handoff` as a prompt reaches the model as ordinary text (the ACP server logs
+`Skill not found for user prompt invocation`), so it cannot trigger the native flow.
+
+The supported equivalent for external agents is the [Devin Sessions
+API](https://docs.devin.ai/api-reference/overview) — the same API `/handoff` uses — wrapped by the
+open-source [devin-handoff](https://github.com/club-cog/devin-handoff) plugin: `POST /v1/sessions`
+with a prompt carrying the task, repo/branch, context digest, and a `git diff HEAD` block (capped at
+100KB), then `GET /v1/sessions/{id}` for status. That path requires a `DEVIN_API_KEY` from
+[API keys](https://app.devin.ai/settings/api-keys); the Devin CLI's stored login credential is not
+accepted by `api.devin.ai` and cannot be reused for it.
+
+Until a Synara-native version exists, run `/handoff` in the Devin CLI itself or install the
+devin-handoff skill so the session's agent can call it.
+
 ## Switching providers
 
 A [provider handoff](https://www.trysynara.com/docs/workflows/handoffs) allows another provider to

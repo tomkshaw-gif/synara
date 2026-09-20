@@ -1,11 +1,13 @@
 import {
   PROVIDER_DISPLAY_NAMES,
   THREAD_GOAL_MAX_CHARS,
+  type DevinModelOptions,
   type MessageId,
   type ModelSelection,
   type OrchestrationShellSnapshot,
   type ProviderInteractionMode,
   type ProviderKind,
+  type ProviderModelDescriptor,
   type ProviderNativeCommandDescriptor,
   type ProviderModelOptions,
   type RuntimeMode,
@@ -35,6 +37,7 @@ import {
   buildThreadHandoffImportedMessages,
   resolveThreadHandoffModelSelection,
 } from "../lib/threadHandoff";
+import { devinFusionFastModePatch } from "../lib/devinFusion";
 import { toastManager } from "../components/ui/toast";
 import type { ComposerCommandItem } from "../components/chat/ComposerCommandMenu";
 import { buildNextProviderOptions } from "../providerModelOptions";
@@ -91,6 +94,7 @@ export function useComposerSlashCommands(input: {
   selectedProvider: ProviderKind;
   currentProviderModelOptions: ProviderModelOptions[ProviderKind] | undefined;
   selectedModelSelection: ModelSelection;
+  selectedRuntimeModel?: ProviderModelDescriptor | undefined;
   environmentMode: string | null;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -144,6 +148,7 @@ export function useComposerSlashCommands(input: {
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
+    selectedRuntimeModel,
     environmentMode,
     runtimeMode,
     interactionMode,
@@ -215,18 +220,37 @@ export function useComposerSlashCommands(input: {
 
   const setFastModeFromSlashCommand = useCallback(
     (enabled: boolean) => {
+      // Fusion encodes its fast tier inside the pairing uid; a generic
+      // `fastMode` trait would be stripped at dispatch and do nothing.
+      const fusionPatch =
+        selectedProvider === "devin"
+          ? devinFusionFastModePatch({
+              modelVariants: selectedRuntimeModel?.modelVariants,
+              modelVariant: (currentProviderModelOptions as DevinModelOptions | undefined)
+                ?.modelVariant,
+              fast: enabled,
+            })
+          : null;
       setComposerDraftProviderModelOptions(
         threadId,
         selectedProvider,
-        buildNextProviderOptions(selectedProvider, currentProviderModelOptions, {
-          fastMode: enabled,
-        }),
+        buildNextProviderOptions(
+          selectedProvider,
+          currentProviderModelOptions,
+          fusionPatch ?? { fastMode: enabled },
+        ),
         {
           persistSticky: true,
         },
       );
     },
-    [currentProviderModelOptions, selectedProvider, setComposerDraftProviderModelOptions, threadId],
+    [
+      currentProviderModelOptions,
+      selectedProvider,
+      selectedRuntimeModel,
+      setComposerDraftProviderModelOptions,
+      threadId,
+    ],
   );
 
   const runFastSlashCommand = useCallback(
