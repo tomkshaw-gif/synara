@@ -31,22 +31,111 @@ export interface BrowserProfileBridgeRepairResult {
   readonly error?: unknown;
 }
 
+const SYNARA_DEVIN_SESSION_OVERLAY_PREFIX = "synara-devin-";
+
+function pathIsInside(parent: string, child: string, windows: boolean): boolean {
+  const normalize = (value: string) => {
+    const resolved = Path.resolve(value);
+    return windows ? resolved.toLowerCase() : resolved;
+  };
+  const parentPath = normalize(parent);
+  const childPath = normalize(child);
+  if (childPath === parentPath) return true;
+  const prefix = parentPath.endsWith(Path.sep) ? parentPath : `${parentPath}${Path.sep}`;
+  return childPath.startsWith(prefix);
+}
+
+/**
+ * True when `directory` is a Synara-created Devin session overlay
+ * (`<tmp>/synara-devin-*`). Those directories are child-process isolation
+ * homes, not the user's persistent APPDATA / XDG config.
+ */
+export function isSynaraDevinSessionOverlayDirectory(
+  directory: string | undefined,
+  options: {
+    readonly tmpDir?: string | undefined;
+    readonly platform?: NodeJS.Platform | undefined;
+  } = {},
+): boolean {
+  const trimmed = directory?.trim();
+  if (!trimmed) return false;
+  const platform = options.platform ?? process.platform;
+  const baseName = Path.basename(Path.resolve(trimmed));
+  const matchesPrefix =
+    platform === "win32"
+      ? baseName.toLowerCase().startsWith(SYNARA_DEVIN_SESSION_OVERLAY_PREFIX)
+      : baseName.startsWith(SYNARA_DEVIN_SESSION_OVERLAY_PREFIX);
+  if (!matchesPrefix) return false;
+  return pathIsInside(options.tmpDir ?? OS.tmpdir(), trimmed, platform === "win32");
+}
+
 export function resolveDesktopAppDataBase(input?: {
-  readonly platform?: NodeJS.Platform;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly homeDir?: string;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly homeDir?: string | undefined;
+  readonly tmpDir?: string | undefined;
 }): string {
   const platform = input?.platform ?? process.platform;
   const env = input?.env ?? process.env;
   const homeDir = input?.homeDir ?? OS.homedir();
+  const overlayOptions = { platform, tmpDir: input?.tmpDir };
 
   if (platform === "win32") {
-    return env.APPDATA || Path.join(homeDir, "AppData", "Roaming");
+    const appData = env.APPDATA?.trim();
+    if (appData && !isSynaraDevinSessionOverlayDirectory(appData, overlayOptions)) {
+      return appData;
+    }
+    return Path.join(homeDir, "AppData", "Roaming");
   }
   if (platform === "darwin") {
     return Path.join(homeDir, "Library", "Application Support");
   }
-  return env.XDG_CONFIG_HOME || Path.join(homeDir, ".config");
+  const configHome = env.XDG_CONFIG_HOME?.trim();
+  if (configHome && !isSynaraDevinSessionOverlayDirectory(configHome, overlayOptions)) {
+    return configHome;
+  }
+  return Path.join(homeDir, ".config");
+}
+
+/**
+ * If this process inherited a Devin-session overlay as APPDATA / XDG_CONFIG_HOME
+ * (a temp `synara-devin-*` directory), rewrite it to the persistent user config
+ * home so Electron userData and provider children match a normal shortcut launch.
+ */
+export function restorePersistentDesktopConfigHome(
+  env: NodeJS.ProcessEnv = process.env,
+  options: {
+    readonly platform?: NodeJS.Platform | undefined;
+    readonly homeDir?: string | undefined;
+    readonly tmpDir?: string | undefined;
+  } = {},
+): boolean {
+  const platform = options.platform ?? process.platform;
+  const persistentHome = resolveDesktopAppDataBase({
+    platform,
+    env,
+    homeDir: options.homeDir,
+    tmpDir: options.tmpDir,
+  });
+  if (platform === "win32") {
+    const appData = env.APPDATA?.trim();
+    if (!appData || persistentHome === appData) return false;
+    if (!isSynaraDevinSessionOverlayDirectory(appData, { platform, tmpDir: options.tmpDir })) {
+      return false;
+    }
+    env.APPDATA = persistentHome;
+    return true;
+  }
+  const configHome = env.XDG_CONFIG_HOME?.trim();
+  const posixConfigHome = Path.join(options.homeDir ?? OS.homedir(), ".config");
+  if (
+    !configHome ||
+    !isSynaraDevinSessionOverlayDirectory(configHome, { platform, tmpDir: options.tmpDir })
+  ) {
+    return false;
+  }
+  env.XDG_CONFIG_HOME = platform === "linux" ? persistentHome : posixConfigHome;
+  return true;
 }
 
 export function resolveDesktopUserDataPath(input: {

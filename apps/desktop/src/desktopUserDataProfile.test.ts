@@ -4,9 +4,11 @@ import * as Path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  isSynaraDevinSessionOverlayDirectory,
   repairBrowserProfileFromBridgeManifest,
   resolveDesktopAppDataBase,
   resolveDesktopUserDataPath,
+  restorePersistentDesktopConfigHome,
 } from "./desktopUserDataProfile";
 
 const tempDirs = new Set<string>();
@@ -56,6 +58,46 @@ describe("desktopUserDataProfile", () => {
         homeDir: "/home/tester",
       }),
     ).toBe("/tmp/xdg");
+  });
+
+  it("ignores a Devin session overlay when resolving the Windows profile", () => {
+    const tmpDir = makeTempDir();
+    const overlay = Path.join(tmpDir, "synara-devin-abc123");
+    expect(
+      resolveDesktopAppDataBase({
+        platform: "win32",
+        env: { APPDATA: overlay },
+        homeDir: "C:\\Users\\tester",
+        tmpDir,
+      }),
+    ).toBe(Path.join("C:\\Users\\tester", "AppData", "Roaming"));
+  });
+
+  it("restores inherited Devin overlay APPDATA to the persistent roaming home", () => {
+    const tmpDir = makeTempDir();
+    const overlay = Path.join(tmpDir, "synara-devin-abc123");
+    const env = { APPDATA: overlay };
+    expect(
+      restorePersistentDesktopConfigHome(env, {
+        platform: "win32",
+        homeDir: "C:\\Users\\tester",
+        tmpDir,
+      }),
+    ).toBe(true);
+    expect(env.APPDATA).toBe(Path.join("C:\\Users\\tester", "AppData", "Roaming"));
+    expect(isSynaraDevinSessionOverlayDirectory(overlay, { platform: "win32", tmpDir })).toBe(true);
+  });
+
+  it("does not rewrite a normal Windows APPDATA value", () => {
+    const env = { APPDATA: "C:\\Users\\tester\\AppData\\Roaming" };
+    expect(
+      restorePersistentDesktopConfigHome(env, {
+        platform: "win32",
+        homeDir: "C:\\Users\\tester",
+        tmpDir: makeTempDir(),
+      }),
+    ).toBe(false);
+    expect(env.APPDATA).toBe("C:\\Users\\tester\\AppData\\Roaming");
   });
 
   it("repairs missing browser data from the profile recorded by the bridge", () => {

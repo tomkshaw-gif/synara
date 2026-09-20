@@ -256,6 +256,7 @@ import {
   repairBrowserProfileFromBridgeManifest,
   resolveDesktopAppDataBase,
   resolveDesktopUserDataPath,
+  restorePersistentDesktopConfigHome,
 } from "./desktopUserDataProfile";
 import { isBrokenPipeError } from "./desktopProcessErrors";
 import { createDesktopStaticProtocolResolver } from "./desktopStaticProtocol";
@@ -311,6 +312,11 @@ const startupBundleIdentity = captureStartupBundleIdentity();
 // (The probe also carries PATH, SSH_AUTH_SOCK and HOMEBREW_* for later provider spawns.
 // APPDATA on Windows is inherited from the process env, not hydrated here.)
 const shellEnvironmentSync = syncShellEnvironment();
+// A Synara process launched from a Devin ACP child inherits that session's
+// remapped APPDATA/XDG overlay (`<tmp>/synara-devin-*`). Restore the persistent
+// user config home before userData and the backend are resolved so Devin
+// session/start reads the real MCP config, matching a normal shortcut launch.
+restorePersistentDesktopConfigHome();
 
 const IPC = DESKTOP_IPC_CHANNELS;
 const MAX_CLIPBOARD_IMAGE_DATA_URL_LENGTH = 16 * 1024 * 1024;

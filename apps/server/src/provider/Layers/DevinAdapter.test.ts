@@ -1188,10 +1188,63 @@ describe("applyDevinAcpModelSelection", () => {
     ]);
   });
 
+  it("does not pin a bare Fusion family slug; start-model resolution must expand it first", async () => {
+    const { runtime, calls } = makeModelConfigRuntime([devinModelConfigOption]);
+
+    await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: "fusion" }));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("pins the pairing resolveDevinStartModel returns for a Fusion family pick", async () => {
+    const pairing = "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium";
+    const { runtime, calls } = makeModelConfigRuntime([
+      {
+        ...devinModelConfigOption,
+        options: [...devinModelConfigOption.options, { value: pairing, name: "Fusion default" }],
+      },
+    ]);
+
+    const effectiveModel = await Effect.runPromise(
+      resolveDevinStartModel({
+        explicitModel: undefined,
+        modelSelection: { model: "fusion" },
+        discoverModels: () =>
+          Effect.succeed({
+            source: "devin-cli",
+            cached: false,
+            models: [
+              {
+                slug: "fusion",
+                name: "Fusion",
+                modelVariants: [
+                  { model: "fusion-claude-fable-5-1-medium-fast-sidekick-swe-2-medium" },
+                  { model: pairing },
+                  { model: "fusion-claude-opus-5-high-sidekick-swe-2-medium" },
+                ],
+              },
+            ],
+          }),
+      }),
+    );
+
+    expect(effectiveModel).toBe(pairing);
+    await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: effectiveModel }));
+    expect(calls).toEqual([{ method: "setModel", args: [pairing] }]);
+  });
+
   it("skips unadvertised non-Fusion values so the spawn flag keeps working", async () => {
     const { runtime, calls } = makeModelConfigRuntime([devinModelConfigOption]);
 
     await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: "claude-opus-5" }));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("leaves advertised non-Fusion models on the official spawn flag", async () => {
+    const { runtime, calls } = makeModelConfigRuntime([devinModelConfigOption]);
+
+    await Effect.runPromise(applyDevinAcpModelSelection({ runtime, model: "swe-1-7" }));
 
     expect(calls).toEqual([]);
   });

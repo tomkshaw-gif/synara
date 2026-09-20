@@ -650,14 +650,14 @@ export function applyDevinSessionConfiguration(input: {
 }
 
 /**
- * Re-asserts the resolved model on the live ACP session. `devin acp --model`
- * accepts fuzzy names: family slugs land on the CLI's default variant
- * (`--model fusion` picks the first pairing) and unrecognized values are
- * silently ignored. Applying the concrete uid through the model config option
- * — the same channel `/model` uses — pins the exact variant. Values that are
- * not advertised stay on the spawn flag, except Fusion pairings, which fail
- * fast instead of silently running a different lead/sidekick pair. Sessions on
- * older CLIs without a model config option keep spawn-flag behavior.
+ * Re-asserts a Fusion pairing on the live ACP session. `devin acp --model`
+ * is fuzzy: `--model fusion` lands on an arbitrary advertised pair, and an
+ * unrecognized value is ignored. Non-Fusion models keep official spawn-flag
+ * behavior. Fusion uids are pinned through the model config option — the same
+ * channel `/model` uses — so the selected lead/sidekick pair is exact.
+ * Unadvertised Fusion pairings fail closed instead of silently running a
+ * different pair. Sessions on older CLIs without a model config option keep
+ * spawn-flag behavior.
  */
 export function applyDevinAcpModelSelection(input: {
   readonly runtime: Pick<AcpSessionRuntimeShape, "getConfigOptions" | "setModel">;
@@ -665,7 +665,7 @@ export function applyDevinAcpModelSelection(input: {
 }): Effect.Effect<void, ProviderAdapterError> {
   return Effect.gen(function* () {
     const model = trimOrNull(input.model);
-    if (model === null) {
+    if (model === null || parseDevinFusionModelUid(model) === null) {
       return;
     }
     const configOptions = yield* input.runtime.getConfigOptions.pipe(
@@ -2429,9 +2429,9 @@ export function makeDevinAdapter(
               runtimeMode: input.runtimeMode,
               interactionMode: undefined,
             });
-            // `--model` is fuzzy at spawn; pin the resolved uid through the
-            // session's model config option so Fusion pairings and other
-            // concrete variants apply exactly as selected.
+            // `--model fusion` is fuzzy at spawn; pin a concrete Fusion uid
+            // through the session model option. Non-Fusion models stay on the
+            // official spawn-flag path.
             yield* applyDevinAcpModelSelection({
               runtime: acp,
               model: effectiveModel,
