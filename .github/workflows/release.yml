@@ -1,9 +1,10 @@
 name: Release Desktop
 
+# Fork note: the tag-push trigger is removed on this fork. Tag pushes are owned
+# by release-win.yml; this upstream workflow stays dispatch-only for manual
+# multi-platform validation so its macOS publish lanes cannot fail unattended
+# on a fork without signing secrets.
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
       version:
