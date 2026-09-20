@@ -43,6 +43,7 @@ export function useChatTranscriptScroll({
 
   const isAtEndRef = useRef(true);
   const autoFollowThreadIdRef = useRef<ThreadId | null>(null);
+  const previousFollowThreadIdRef = useRef<ThreadId | null | undefined>(undefined);
   const pendingInteractionAnchorRef = useRef<{
     element: HTMLElement;
     top: number;
@@ -539,15 +540,56 @@ export function useChatTranscriptScroll({
       });
   }, [legendListRef, cancelPendingScrollGesture, setTranscriptScrollDetached]);
   useEffect(() => {
+    const previousThreadId = previousFollowThreadIdRef.current;
+    previousFollowThreadIdRef.current = activeThreadId;
+    if (previousThreadId === activeThreadId) {
+      return;
+    }
     isAtEndRef.current = true;
     settledScrollRequestRef.current += 1;
     settledScrollInFlightRef.current = false;
     programmaticScrollUntilRef.current = 0;
     setTranscriptScrollDetached(false);
     showScrollDebouncer.current.cancel();
+    // A remounted/switched timeline can report "not at end" before LegendList
+    // finishes initialScrollAtEnd. Arm follow for a live stream so the layout
+    // effect keeps re-sticking instead of treating that first report as a
+    // reader detach. Streaming starting on the same thread must not re-arm.
+    autoFollowThreadIdRef.current =
+      activeThreadId !== null && hasStreamingAssistantText ? activeThreadId : null;
     const settle = window.setTimeout(() => setShowScrollToBottom(false), 0);
-    return () => window.clearTimeout(settle);
-  }, [activeThreadId, setTranscriptScrollDetached]);
+    const followThreadId = autoFollowThreadIdRef.current;
+    let settleFrame = 0;
+    let settleAttempts = 0;
+    const retrySettledFollow = () => {
+      if (
+        previousFollowThreadIdRef.current !== followThreadId ||
+        followThreadId === null ||
+        settleAttempts >= 60
+      ) {
+        return;
+      }
+      settleAttempts += 1;
+      if (legendListRef.current?.scrollToEnd) {
+        onScrollToBottom();
+        return;
+      }
+      settleFrame = window.requestAnimationFrame(retrySettledFollow);
+    };
+    if (followThreadId !== null) {
+      settleFrame = window.requestAnimationFrame(retrySettledFollow);
+    }
+    return () => {
+      window.clearTimeout(settle);
+      window.cancelAnimationFrame(settleFrame);
+    };
+  }, [
+    activeThreadId,
+    hasStreamingAssistantText,
+    legendListRef,
+    onScrollToBottom,
+    setTranscriptScrollDetached,
+  ]);
 
   return {
     showScrollToBottom,

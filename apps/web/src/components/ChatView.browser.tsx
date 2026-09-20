@@ -4123,17 +4123,24 @@ describe("ChatView transcript geometry (full app)", () => {
         // the reader is looking at must remain at the same viewport position.
         expect(readAnchorTop()).toBeCloseTo(detachedTop, 0);
         if (action === "thread switch") {
+          const previousContainer = container;
           await mounted.router.navigate({
             to: "/$threadId",
             params: { threadId: OTHER_THREAD_ID },
           });
           await waitForLayout();
           await mounted.router.navigate({ to: "/$threadId", params: { threadId: THREAD_ID } });
-          container = await waitForElement(
-            () => document.querySelector<HTMLElement>("[data-chat-scroll-container='true']"),
-            "Transcript did not remount.",
-          );
-          await waitForLayout();
+          // The outgoing list can stay connected for a frame. Measuring it
+          // reads the pre-switch detached offset (thousands of px from the
+          // tail) and fails the follow assertion without ever seeing the
+          // remounted timeline.
+          container = await waitForElement(() => {
+            const next = document.querySelector<HTMLElement>("[data-chat-scroll-container='true']");
+            if (!next || next === previousContainer || !isTranscriptContentVisible(next)) {
+              return null;
+            }
+            return next;
+          }, "Transcript did not remount.");
         } else if (action === "arrow" || keyboardKey !== null || action === "find") {
           const arrow = await waitForElement(
             () =>
