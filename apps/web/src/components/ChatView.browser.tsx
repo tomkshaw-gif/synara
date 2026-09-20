@@ -4134,13 +4134,22 @@ describe("ChatView transcript geometry (full app)", () => {
           // reads the pre-switch detached offset (thousands of px from the
           // tail) and fails the follow assertion without ever seeing the
           // remounted timeline.
-          container = await waitForElement(() => {
-            const next = document.querySelector<HTMLElement>("[data-chat-scroll-container='true']");
-            if (!next || next === previousContainer || !isTranscriptContentVisible(next)) {
-              return null;
-            }
-            return next;
-          }, "Transcript did not remount.");
+          await vi.waitFor(
+            () => {
+              grow();
+              const next = document.querySelector<HTMLElement>(
+                "[data-chat-scroll-container='true']",
+              );
+              expect(next, "Transcript did not remount.").not.toBeNull();
+              expect(next).not.toBe(previousContainer);
+              expect(isTranscriptContentVisible(next!)).toBe(true);
+              expect(getScrollContainerDistanceFromBottom(next!)).toBeLessThanOrEqual(
+                AUTO_SCROLL_BOTTOM_THRESHOLD_PX,
+              );
+            },
+            { timeout: 8_000, interval: 50 },
+          );
+          container = document.querySelector<HTMLElement>("[data-chat-scroll-container='true']")!;
         } else if (action === "arrow" || keyboardKey !== null || action === "find") {
           const arrow = await waitForElement(
             () =>

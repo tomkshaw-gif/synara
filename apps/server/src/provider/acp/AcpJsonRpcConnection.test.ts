@@ -323,6 +323,7 @@ describe("AcpSessionRuntime", () => {
         // The load response starts in ask mode, then replay reports code mode.
         // Waiting before reading retained state makes this ask request a real
         // write instead of incorrectly treating it as an early no-op.
+        yield* Effect.sleep("80 millis");
         yield* runtime.setMode("ask");
 
         const modeRequest = requestEvents.find(

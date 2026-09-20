@@ -565,14 +565,19 @@ export function useChatTranscriptScroll({
       if (
         previousFollowThreadIdRef.current !== followThreadId ||
         followThreadId === null ||
-        settleAttempts >= 60
+        settleAttempts >= 90
       ) {
         return;
       }
       settleAttempts += 1;
+      const node = legendListRef.current?.getScrollableNode?.();
       if (legendListRef.current?.scrollToEnd) {
-        onScrollToBottom();
-        return;
+        if (!(node instanceof HTMLElement) || !isScrollContainerNearBottom(node, 1)) {
+          scrollToEnd(false);
+        }
+        if (node instanceof HTMLElement && isScrollContainerNearBottom(node, 1)) {
+          return;
+        }
       }
       settleFrame = window.requestAnimationFrame(retrySettledFollow);
     };
@@ -587,7 +592,7 @@ export function useChatTranscriptScroll({
     activeThreadId,
     hasStreamingAssistantText,
     legendListRef,
-    onScrollToBottom,
+    scrollToEnd,
     setTranscriptScrollDetached,
   ]);
 
