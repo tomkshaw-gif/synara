@@ -1,0 +1,230 @@
+name: Release Desktop (Windows)
+
+# Fork-local Windows release lane. The upstream release.yml builds signed
+# macOS/Windows artifacts and publishes the CLI to npm; a personal fork lacks
+# the Apple/Azure/npm secrets those jobs require, so this workflow ships the
+# unsigned Windows NSIS installer plus the updater manifests the installed app
+# polls (synara.yml/latest.yml). release.yml remains unmodified so upstream
+# syncs never conflict.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, e.g. 0.8.5
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  gates:
+    name: Quality gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
+      ref: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: release_mode
+        name: Resolve publication mode
+        shell: bash
+        env:
+          PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish_release }}
+        run: |
+          # This fork lane always publishes; the input only exists so the same
+          # provenance check the upstream workflow runs still receives a value.
+          echo "publish_release=true" >> "$GITHUB_OUTPUT"
+
+      - id: release_meta
+        name: Resolve release policy
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+        run: node scripts/resolve-release-update-policy.ts "$RELEASE_VERSION"
+
+      - name: Verify exact release source
+        env:
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          SOURCE_REF_TYPE: ${{ github.ref_type }}
+          SOURCE_REF_NAME: ${{ github.ref_name }}
+        run: |
+          node scripts/verify-release-source-provenance.ts \
+            "$RELEASE_VERSION" \
+            "$RELEASE_TAG" \
+            "true" \
+            "$EXPECTED_COMMIT" \
+            "$SOURCE_REF_TYPE" \
+            "$SOURCE_REF_NAME"
+
+      - name: Verify public updater repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          visibility="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .visibility)"
+          if [[ "$visibility" != "public" ]]; then
+            echo "The dedicated updater channel requires the public GitHub provider; repository visibility is $visibility." >&2
+            exit 1
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify Synara identity
+        run: bun run brand:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+  build:
+    name: Build Windows x64
+    needs: gates
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.gates.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        # Native artifacts keep runtime/build dependencies; the unrelated
+        # marketing site is not installed.
+        run: bun install --frozen-lockfile --ignore-scripts --filter '!@synara/marketing'
+
+      - name: Build desktop artifact
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          LOCKFILE_SHA256="$(sha256sum bun.lock | cut -d' ' -f1)"
+          bun run dist:desktop:artifact -- \
+            --platform win \
+            --target nsis \
+            --arch x64 \
+            --build-version "${{ needs.gates.outputs.version }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-tag "${{ needs.gates.outputs.tag }}" \
+            --lockfile-sha256 "$LOCKFILE_SHA256" \
+            --verbose
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-publish
+          shopt -s nullglob
+          for pattern in \
+            "release/*.exe" \
+            "release/*.blockmap" \
+            "release/latest*.yml"; do
+            for file in $pattern; do
+              cp "$file" release-publish/
+            done
+          done
+          # Existing installs poll the dedicated `synara` channel manifest; new
+          # installs use latest.yml. Ship both so either feed resolves.
+          if [[ -f release-publish/latest.yml ]]; then
+            cp release-publish/latest.yml release-publish/synara.yml
+          fi
+
+      - name: Verify and record artifact provenance
+        shell: bash
+        run: |
+          node scripts/write-release-artifact-provenance.ts \
+            --assets-dir release-publish \
+            --platform win \
+            --arch x64 \
+            --target nsis \
+            --version "${{ needs.gates.outputs.version }}" \
+            --source-commit "$GITHUB_SHA" \
+            --source-tag "${{ needs.gates.outputs.tag }}" \
+            --lockfile-sha256 "$(sha256sum bun.lock | cut -d' ' -f1)" \
+            --publication true \
+            --signed false \
+            --allow-unsigned-windows-publication true
+
+      - name: Smoke packaged desktop startup
+        shell: bash
+        run: |
+          node scripts/verify-packaged-desktop-startup.ts \
+            --assets-dir release-publish \
+            --platform win \
+            --arch x64 \
+            --version "${{ needs.gates.outputs.version }}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-win-x64
+          path: release-publish/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [gates, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: desktop-win-x64
+          path: release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.gates.outputs.tag }}
+          target_commitish: ${{ needs.gates.outputs.ref }}
+          name: Synara v${{ needs.gates.outputs.version }}
+          generate_release_notes: true
+          prerelease: false
+          make_latest: true
+          files: |
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/*.yml
+            release-assets/*.provenance.json
+          fail_on_unmatched_files: true
