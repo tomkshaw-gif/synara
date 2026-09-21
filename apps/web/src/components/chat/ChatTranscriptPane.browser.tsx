@@ -34,6 +34,19 @@ async function settleLayout(): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
+async function waitForStableCommitCount(readCount: () => number): Promise<number> {
+  let last = readCount();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await settleLayout();
+    const next = readCount();
+    if (next === last) {
+      return last;
+    }
+    last = next;
+  }
+  return last;
+}
+
 function TranscriptPerfHarness(props: { onTranscriptRender: () => void }) {
   const [composerValue, setComposerValue] = useState("");
   const composerImagesRef = useRef<readonly []>([]);
@@ -151,12 +164,16 @@ describe("ChatTranscriptPane", () => {
         expect(transcriptCommitCount).toBeGreaterThan(0);
       });
 
-      const baselineCommitCount = transcriptCommitCount;
+      // LegendList/tool-group layout can commit the pane after the first paint.
+      // Snapshot the baseline only once that burst has settled, otherwise CI
+      // attributes a late mount commit to the composer fill.
+      const baselineCommitCount = await waitForStableCommitCount(() => transcriptCommitCount);
       await page.getByPlaceholder("Type composer text").fill("reply follow up");
 
       await vi.waitFor(() => {
         expect(screen.container.querySelector("#composer-input")).toHaveValue("reply follow up");
       });
+      await settleLayout();
 
       expect(transcriptCommitCount).toBe(baselineCommitCount);
     } finally {
