@@ -12,6 +12,10 @@
       "types": "./src/computerInvocation.ts",
       "import": "./src/computerInvocation.ts"
     },
+    "./orchestrationInvocation": {
+      "types": "./src/orchestrationInvocation.ts",
+      "import": "./src/orchestrationInvocation.ts"
+    },
     "./modelImageBudget": {
       "types": "./src/modelImageBudget.ts",
       "import": "./src/modelImageBudget.ts"

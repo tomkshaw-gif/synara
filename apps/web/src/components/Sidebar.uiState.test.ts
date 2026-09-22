@@ -40,6 +40,7 @@ describe("Sidebar.uiState", () => {
       chatThreadListExtraPages: 0,
       projectThreadListExtraPagesByCwd: {},
       dismissedThreadStatusKeyByThreadId: {},
+      threadChildExpansionByThreadId: {},
       lastThreadRoute: null,
       activityViewEnabled: false,
     });
@@ -56,6 +57,9 @@ describe("Sidebar.uiState", () => {
       },
       dismissedThreadStatusKeyByThreadId: {
         "thread-123": "Plan Ready:turn-1",
+      },
+      threadChildExpansionByThreadId: {
+        "thread-123": true,
       },
       lastThreadRoute: {
         threadId: "thread-123",
@@ -74,6 +78,9 @@ describe("Sidebar.uiState", () => {
       },
       dismissedThreadStatusKeyByThreadId: {
         "thread-123": "Plan Ready:turn-1",
+      },
+      threadChildExpansionByThreadId: {
+        "thread-123": true,
       },
       lastThreadRoute: {
         threadId: "thread-123",
@@ -101,6 +108,11 @@ describe("Sidebar.uiState", () => {
           "": "bad",
           "thread-456": 42,
         },
+        threadChildExpansionByThreadId: {
+          "thread-ok": false,
+          "": true,
+          "thread-bad": "yes",
+        },
         lastThreadRoute: {
           threadId: "thread-123",
           splitViewId: 42,
@@ -116,6 +128,9 @@ describe("Sidebar.uiState", () => {
       },
       dismissedThreadStatusKeyByThreadId: {
         "thread-123": "Awaiting Input:turn-2",
+      },
+      threadChildExpansionByThreadId: {
+        "thread-ok": false,
       },
       lastThreadRoute: {
         threadId: "thread-123",
@@ -159,6 +174,7 @@ describe("Sidebar.uiState", () => {
       chatThreadListExtraPages: 0,
       projectThreadListExtraPagesByCwd: {},
       dismissedThreadStatusKeyByThreadId: {},
+      threadChildExpansionByThreadId: {},
       lastThreadRoute: null,
       activityViewEnabled: false,
     });

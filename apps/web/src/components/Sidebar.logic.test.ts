@@ -1601,6 +1601,101 @@ describe("buildProjectThreadTree", () => {
       [ThreadId.makeUnsafe("thread-grandchild"), 2],
     ]);
   });
+
+  it("reports child counts and auto-expands parents with a live descendant", () => {
+    const rows = buildProjectThreadTree({
+      threads: [
+        makeSidebarThreadSummary({ id: ThreadId.makeUnsafe("thread-parent") }),
+        makeSidebarThreadSummary({
+          id: ThreadId.makeUnsafe("thread-worker"),
+          parentThreadId: ThreadId.makeUnsafe("thread-parent"),
+          hasLiveTailWork: true,
+        }),
+        makeSidebarThreadSummary({ id: ThreadId.makeUnsafe("thread-idle") }),
+        makeSidebarThreadSummary({
+          id: ThreadId.makeUnsafe("thread-idle-child"),
+          parentThreadId: ThreadId.makeUnsafe("thread-idle"),
+        }),
+      ],
+    });
+
+    const parentRow = rows.find((row) => row.thread.id === ThreadId.makeUnsafe("thread-parent"));
+    const idleRow = rows.find((row) => row.thread.id === ThreadId.makeUnsafe("thread-idle"));
+    expect(parentRow).toEqual(
+      expect.objectContaining({ childCount: 1, expanded: true, hasLiveDescendant: true }),
+    );
+    expect(idleRow).toEqual(
+      expect.objectContaining({ childCount: 1, expanded: false, hasLiveDescendant: false }),
+    );
+    // The live worker's row renders; the idle child stays collapsed away.
+    expect(rows.map((row) => row.thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-parent"),
+      ThreadId.makeUnsafe("thread-worker"),
+      ThreadId.makeUnsafe("thread-idle"),
+    ]);
+  });
+
+  it("honors persisted expansion overrides in both directions", () => {
+    const overrides = new Map<ThreadId, boolean>([
+      [ThreadId.makeUnsafe("thread-live-parent"), false],
+      [ThreadId.makeUnsafe("thread-idle-parent"), true],
+    ]);
+    const rows = buildProjectThreadTree({
+      threads: [
+        makeSidebarThreadSummary({ id: ThreadId.makeUnsafe("thread-live-parent") }),
+        makeSidebarThreadSummary({
+          id: ThreadId.makeUnsafe("thread-live-worker"),
+          parentThreadId: ThreadId.makeUnsafe("thread-live-parent"),
+          hasLiveTailWork: true,
+        }),
+        makeSidebarThreadSummary({ id: ThreadId.makeUnsafe("thread-idle-parent") }),
+        makeSidebarThreadSummary({
+          id: ThreadId.makeUnsafe("thread-idle-worker"),
+          parentThreadId: ThreadId.makeUnsafe("thread-idle-parent"),
+        }),
+      ],
+      childExpansionOverrides: overrides,
+    });
+
+    const liveParent = rows.find(
+      (row) => row.thread.id === ThreadId.makeUnsafe("thread-live-parent"),
+    );
+    const idleParent = rows.find(
+      (row) => row.thread.id === ThreadId.makeUnsafe("thread-idle-parent"),
+    );
+    // A manual collapse wins over the live-worker auto-reveal...
+    expect(liveParent?.expanded).toBe(false);
+    expect(liveParent?.hasLiveDescendant).toBe(true);
+    // ...and a manual expand pins an idle group open.
+    expect(idleParent?.expanded).toBe(true);
+    expect(idleParent?.hasLiveDescendant).toBe(false);
+    expect(rows.map((row) => row.thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-live-parent"),
+      ThreadId.makeUnsafe("thread-idle-parent"),
+      ThreadId.makeUnsafe("thread-idle-worker"),
+    ]);
+  });
+
+  it("still reveals the active thread's ancestors over a collapse override", () => {
+    const rows = buildProjectThreadTree({
+      threads: [
+        makeSidebarThreadSummary({ id: ThreadId.makeUnsafe("thread-parent") }),
+        makeSidebarThreadSummary({
+          id: ThreadId.makeUnsafe("thread-child"),
+          parentThreadId: ThreadId.makeUnsafe("thread-parent"),
+        }),
+      ],
+      forceVisibleThreadId: ThreadId.makeUnsafe("thread-child"),
+      childExpansionOverrides: new Map([[ThreadId.makeUnsafe("thread-parent"), false]]),
+    });
+
+    // The row the user is looking at can never be hidden by its own collapse.
+    expect(rows.map((row) => row.thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-parent"),
+      ThreadId.makeUnsafe("thread-child"),
+    ]);
+    expect(rows[0]?.expanded).toBe(true);
+  });
 });
 
 describe("getVisibleSidebarEntriesForPreview", () => {

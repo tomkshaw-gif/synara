@@ -13,6 +13,9 @@ export type SidebarUiState = {
   chatThreadListExtraPages: number;
   projectThreadListExtraPagesByCwd: Record<string, number>;
   dismissedThreadStatusKeyByThreadId: Record<string, string>;
+  /** Per-parent disclosure override for child (subagent) thread rows: true pins the
+   *  group open, false pins it shut, absent falls back to live-worker auto-reveal. */
+  threadChildExpansionByThreadId: Record<string, boolean>;
   lastThreadRoute: LastThreadRoute | null;
   /** Swaps the Projects surface for the flat task-feed Activity view. */
   activityViewEnabled: boolean;
@@ -23,6 +26,7 @@ const DEFAULT_SIDEBAR_UI_STATE: SidebarUiState = {
   chatThreadListExtraPages: 0,
   projectThreadListExtraPagesByCwd: {},
   dismissedThreadStatusKeyByThreadId: {},
+  threadChildExpansionByThreadId: {},
   lastThreadRoute: null,
   activityViewEnabled: false,
 };
@@ -80,6 +84,7 @@ export function readSidebarUiState(): SidebarUiState {
       chatThreadListExpanded?: boolean;
       expandedProjectThreadListCwds?: string[];
       dismissedThreadStatusKeyByThreadId?: Record<string, string>;
+      threadChildExpansionByThreadId?: Record<string, unknown>;
       lastThreadRoute?: {
         threadId?: unknown;
         splitViewId?: unknown;
@@ -131,6 +136,12 @@ export function readSidebarUiState(): SidebarUiState {
             statusKey.length > 0,
         ),
       ),
+      threadChildExpansionByThreadId: Object.fromEntries(
+        Object.entries(parsed.threadChildExpansionByThreadId ?? {}).filter(
+          (entry): entry is [string, boolean] =>
+            entry[0].length > 0 && typeof entry[1] === "boolean",
+        ),
+      ),
       lastThreadRoute,
       activityViewEnabled: parsed.activityViewEnabled === true,
     };
@@ -174,6 +185,11 @@ export function persistSidebarUiState(input: SidebarUiState): void {
         dismissedThreadStatusKeyByThreadId: Object.fromEntries(
           Object.entries(input.dismissedThreadStatusKeyByThreadId).filter(
             ([threadId, statusKey]) => threadId.length > 0 && statusKey.length > 0,
+          ),
+        ),
+        threadChildExpansionByThreadId: Object.fromEntries(
+          Object.entries(input.threadChildExpansionByThreadId).filter(
+            ([threadId, expanded]) => threadId.length > 0 && typeof expanded === "boolean",
           ),
         ),
         lastThreadRoute: input.lastThreadRoute

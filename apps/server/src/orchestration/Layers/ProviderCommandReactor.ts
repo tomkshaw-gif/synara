@@ -1,6 +1,10 @@
 import { appendAppSnapPromptContext } from "../../provider/appSnapPromptContext.ts";
 import { computerActivationMetadata } from "../../computer/computerActivation.ts";
 import { parseComputerInvocation } from "@synara/shared/computerInvocation";
+import {
+  buildOrchestrationCoordinatorPrompt,
+  parseOrchestrationInvocation,
+} from "@synara/shared/orchestrationInvocation";
 import { AgentGatewaySessionRegistry } from "../../agentGateway/Services/AgentGatewaySessionRegistry";
 import { ComputerService } from "../../computer/Services/ComputerService";
 import { providerWorkspaceChanged } from "../projectRelocationPaths.ts";
@@ -2233,11 +2237,18 @@ const make = Effect.gen(function* () {
       input.dispatchOrigin === undefined || input.dispatchOrigin === "user"
         ? parseComputerInvocation(input.messageText)
         : null;
-    // Synara owns this command. Keep it in durable user text for provenance,
-    // but do not ask the provider to interpret a native slash command.
+    const orchestrationInvocation =
+      input.dispatchOrigin === undefined || input.dispatchOrigin === "user"
+        ? parseOrchestrationInvocation(input.messageText)
+        : null;
+    // Synara owns these commands. Keep them in durable user text for provenance,
+    // but do not ask the provider to interpret a native slash command; the
+    // orchestration token expands into the coordinator playbook instead.
     const authoredMessageText = computerInvocation
       ? computerInvocation.prompt || "Use Synara Computer for this task."
-      : input.messageText;
+      : orchestrationInvocation
+        ? buildOrchestrationCoordinatorPrompt(orchestrationInvocation.prompt)
+        : input.messageText;
     const threadMentionProjection = yield* resolveThreadMentionPromptProjection({
       mentions: input.mentions,
       snapshotQuery: projectionSnapshotQuery,

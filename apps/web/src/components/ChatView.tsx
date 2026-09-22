@@ -96,6 +96,7 @@ import {
 import { useComposerFocusRequestStore } from "../composerFocusRequestStore";
 import {
   buildGoalSlashCommandPrompt,
+  buildOrchestrationSlashCommandPrompt,
   canExecuteSideSlashCommand,
   canOfferForkSlashCommand,
   canOfferReviewSlashCommand,
@@ -4480,6 +4481,18 @@ export default function ChatView({
     setComposerPromptValue(buildGoalSlashCommandPrompt(currentPrompt));
   }, [promptRef, scheduleComposerFocus, setComposerPromptValue]);
 
+  // The `+` Orchestration row prefixes the draft with the literal token; the
+  // server expands it into the coordinator playbook for that turn only.
+  const insertOrchestrationSlashCommandInComposer = useCallback(() => {
+    const currentPrompt = promptRef.current;
+    if (/^\s*\/orchestration\b/i.test(currentPrompt)) {
+      scheduleComposerFocus();
+      return;
+    }
+    setComposerPromptValue(buildOrchestrationSlashCommandPrompt(currentPrompt));
+    scheduleComposerFocus();
+  }, [promptRef, scheduleComposerFocus, setComposerPromptValue]);
+
   // Prefills a literal goal so editing reuses the same slash-command path
   // that created the goal, mirroring how queued turns restore into the composer.
   const editThreadGoalInComposer = useCallback(() => {
@@ -5430,6 +5443,7 @@ export default function ChatView({
                           onToggleFastMode={toggleFastMode}
                           onInteractionModeChange={handleInteractionModeChange}
                           onInsertGoal={insertGoalSlashCommandInComposer}
+                          onInsertOrchestration={insertOrchestrationSlashCommandInComposer}
                           onClose={() => {
                             setIsComposerExtrasPanelOpen(false);
                             scheduleComposerFocus();

@@ -350,6 +350,22 @@ export const makeAgentGateway = Effect.gen(function* () {
                   type: "string",
                   enum: ["approval-required", "full-access"],
                 },
+                spawnAs: {
+                  type: "string",
+                  enum: ["standalone", "subagent"],
+                  description:
+                    '"subagent" nests the thread under this thread as a supervised worker: it inherits this project, gets a worker contract prompt, and reports through synara_wait_for_threads / synara_send_message. Default "standalone".',
+                },
+                role: {
+                  type: "string",
+                  description:
+                    'Short worker role label shown under the parent thread (for example "reviewer"). Requires spawnAs:"subagent".',
+                },
+                nickname: {
+                  type: "string",
+                  description:
+                    'Worker nickname shown in the sidebar (for example "Scout"). Requires spawnAs:"subagent".',
+                },
               },
               required: ["prompt", "target"],
               additionalProperties: false,
@@ -414,6 +430,22 @@ export const makeAgentGateway = Effect.gen(function* () {
             type: "string",
             enum: ["approval-required", "full-access"],
           },
+          spawnAs: {
+            type: "string",
+            enum: ["standalone", "subagent"],
+            description:
+              '"subagent" nests the thread under this thread as a supervised worker: it inherits this project, gets a worker contract prompt, and reports through synara_wait_for_threads / synara_send_message. Default "standalone".',
+          },
+          role: {
+            type: "string",
+            description:
+              'Short worker role label shown under the parent thread (for example "reviewer"). Requires spawnAs:"subagent".',
+          },
+          nickname: {
+            type: "string",
+            description:
+              'Worker nickname shown in the sidebar (for example "Scout"). Requires spawnAs:"subagent".',
+          },
         },
         required: ["requestId", "prompt"],
         additionalProperties: false,
@@ -451,6 +483,9 @@ export const makeAgentGateway = Effect.gen(function* () {
           "branchName",
           "runtimeMode",
           "notifyCreatorOnComplete",
+          "spawnAs",
+          "role",
+          "nickname",
         ]) {
           const value = args[key];
           if (value !== undefined) spec[key] = value;

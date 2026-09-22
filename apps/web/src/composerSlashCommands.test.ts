@@ -3,6 +3,7 @@ import { THREAD_GOAL_MAX_CHARS } from "@synara/contracts";
 
 import {
   buildGoalSlashCommandPrompt,
+  buildOrchestrationSlashCommandPrompt,
   buildReviewPrompt,
   buildSubagentsPrompt,
   canExecuteSideSlashCommand,
@@ -375,6 +376,36 @@ describe("composerSlashCommands", () => {
     expect(buildReviewPrompt({ target: "base-branch" })).toContain("base branch");
   });
 
+  it("keeps the /orchestration token literal for server-side expansion", () => {
+    expect(isBuiltInComposerSlashCommand("orchestration")).toBe(true);
+    expect(buildOrchestrationSlashCommandPrompt("refactor the sidebar")).toBe(
+      "/orchestration refactor the sidebar",
+    );
+    // An empty draft still lands the token so the user can type the task after it.
+    expect(buildOrchestrationSlashCommandPrompt("")).toBe("/orchestration ");
+    expect(buildOrchestrationSlashCommandPrompt("   ")).toBe("/orchestration ");
+    expect(
+      parseComposerSlashInvocation(buildOrchestrationSlashCommandPrompt("do the thing")),
+    ).toEqual({ command: "orchestration", args: "do the thing" });
+  });
+
+  it.each(["codex", "claudeAgent", "opencode"] as const)(
+    "offers app-owned /orchestration for %s despite a native name collision",
+    (provider) => {
+      const commands = getAvailableComposerSlashCommands({
+        provider,
+        supportsFastSlashCommand: false,
+        canOfferCompactCommand: false,
+        canOfferReviewCommand: false,
+        canOfferForkCommand: false,
+        canOfferSideCommand: false,
+        canOfferExportCommand: false,
+        providerNativeCommandNames: ["orchestration"],
+      });
+      expect(commands.filter((command) => command === "orchestration")).toHaveLength(1);
+    },
+  );
+
   it("filters app slash commands when a provider exposes the same command natively", () => {
     const availableCommands = getAvailableComposerSlashCommands({
       provider: "codex",
@@ -501,6 +532,7 @@ describe("composerSlashCommands", () => {
       "rename",
       "debug",
       "computer-use",
+      "orchestration",
       "default",
       "feedback",
       "automation",
@@ -629,6 +661,7 @@ describe("composerSlashCommands", () => {
       "side",
       "status",
       "subagents",
+      "orchestration",
       "computer-use",
       "export",
       "goal",

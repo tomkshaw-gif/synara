@@ -6,6 +6,7 @@ import {
   CommandId,
   EventId,
   ProjectId,
+  SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH,
   ThreadId,
   TurnId,
   type ModelSelection,
@@ -43,6 +44,7 @@ import {
   stableGatewayDigest,
 } from "./creationUtils.ts";
 import { mcpToolResultError, mcpToolResultJson, type McpToolCallResult } from "./protocol.ts";
+import { buildSubagentWorkerPrompt } from "./subagentWorkerPrompt.ts";
 import {
   AgentGatewayTargetError,
   resolveAgentGatewayTarget,
@@ -541,6 +543,49 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
               ),
             );
           }
+          const spawnAsSubagent = spec.spawnAs === "subagent";
+          if (!spawnAsSubagent && (spec.role !== undefined || spec.nickname !== undefined)) {
+            return yield* Effect.fail(
+              new ToolInputError('"role" and "nickname" require spawnAs:"subagent".'),
+            );
+          }
+          let subagentParentThreadId: ThreadId | null = null;
+          if (spawnAsSubagent) {
+            if (context.kind !== "provider-session") {
+              return yield* Effect.fail(
+                new GatewayToolError(
+                  "capability_denied",
+                  "Subagent threads require an orchestrating Synara thread.",
+                ),
+              );
+            }
+            if (projectId !== caller!.projectId) {
+              return yield* Effect.fail(
+                new ToolInputError(
+                  'Subagent threads inherit the orchestrator\'s project; omit "projectId" or pass the same project.',
+                ),
+              );
+            }
+            // A thread cannot be its own ancestor: children bind at create time and
+            // parentage never changes, so the only bound to enforce is depth.
+            let callerDepth = 0;
+            let ancestorId = caller!.parentThreadId ?? null;
+            while (ancestorId !== null && callerDepth < SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH) {
+              callerDepth += 1;
+              const ancestor = yield* snapshotQuery.getThreadShellById(ancestorId).pipe(
+                Effect.mapError((error) => new ToolInputError(errorText(error))),
+              );
+              ancestorId = Option.isSome(ancestor) ? (ancestor.value.parentThreadId ?? null) : null;
+            }
+            if (callerDepth >= SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH) {
+              return yield* Effect.fail(
+                new ToolInputError(
+                  `Subagent nesting is limited to ${SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH} levels; this thread is already at the deepest level.`,
+                ),
+              );
+            }
+            subagentParentThreadId = caller!.id;
+          }
           if (spec.enableComputerControl === true) {
             if (context.kind === "provider-session") {
               return yield* Effect.fail(
@@ -651,6 +696,20 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             environment,
             runtimeMode,
             title,
+            // Subagent binding: the child hangs under the calling thread and its
+            // first turn carries the worker contract instead of the bare task.
+            parentThreadId: subagentParentThreadId,
+            subagentNickname: spawnAsSubagent ? (spec.nickname?.trim() || null) : null,
+            subagentRole: spawnAsSubagent ? (spec.role?.trim() || null) : null,
+            promptText: spawnAsSubagent
+              ? buildSubagentWorkerPrompt({
+                  task: spec.prompt,
+                  role: spec.role?.trim() || undefined,
+                  nickname: spec.nickname?.trim() || undefined,
+                  parentThreadId: caller!.id,
+                  parentTitle: caller!.title,
+                })
+              : spec.prompt,
             projectScripts: project.scripts,
             worktreeRef,
             copyChangesFrom,
@@ -1120,6 +1179,15 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                         : {}),
                       gatewayOperationId: operationId,
                       gatewayOperationIndex: entry.index,
+                      ...(entry.parentThreadId !== null
+                        ? { parentThreadId: entry.parentThreadId }
+                        : {}),
+                      ...(entry.subagentNickname !== null
+                        ? { subagentNickname: entry.subagentNickname }
+                        : {}),
+                      ...(entry.subagentRole !== null
+                        ? { subagentRole: entry.subagentRole }
+                        : {}),
                       ...(worktreePath !== null
                         ? {
                             associatedWorktreePath: worktreePath,
@@ -1142,7 +1210,7 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                     message: {
                       messageId: entry.ids.messageId,
                       role: "user",
-                      text: entry.spec.prompt,
+                      text: entry.promptText,
                       attachments: [],
                     },
                     modelSelection: entry.target,

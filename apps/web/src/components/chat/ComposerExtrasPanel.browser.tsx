@@ -128,6 +128,7 @@ async function mountMenu(props?: {
   const onToggleFastMode = vi.fn();
   const onInteractionModeChange = vi.fn();
   const onInsertGoal = vi.fn();
+  const onInsertOrchestration = vi.fn();
   const onClose = vi.fn();
   const host = document.createElement("div");
   document.body.append(host);
@@ -142,6 +143,7 @@ async function mountMenu(props?: {
       onToggleFastMode={onToggleFastMode}
       onInteractionModeChange={onInteractionModeChange}
       onInsertGoal={onInsertGoal}
+      onInsertOrchestration={onInsertOrchestration}
       onClose={onClose}
     />,
     { container: host },
@@ -159,6 +161,7 @@ async function mountMenu(props?: {
     onToggleFastMode,
     onInteractionModeChange,
     onInsertGoal,
+    onInsertOrchestration,
     onClose,
   };
 }
@@ -231,6 +234,15 @@ describe("ComposerExtrasPanel", () => {
     await page.getByText("Set a goal to keep pursuing").click();
 
     expect(menu.onInsertGoal).toHaveBeenCalledTimes(1);
+    expect(menu.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("inserts the orchestration command and closes", async () => {
+    await using menu = await mountMenu();
+
+    await page.getByText("Orchestration", { exact: true }).click();
+
+    expect(menu.onInsertOrchestration).toHaveBeenCalledTimes(1);
     expect(menu.onClose).toHaveBeenCalledTimes(1);
   });
 

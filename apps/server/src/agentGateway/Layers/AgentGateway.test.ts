@@ -350,6 +350,7 @@ const VALID_TOKENS: Record<string, string> = {
   "token-parent-claude": "thread-parent",
   "token-parent-readonly": "thread-parent",
   "token-parent-computer": "thread-parent",
+  "token-deep": "thread-deep",
   "token-ghost": "thread-ghost",
 };
 
@@ -2632,6 +2633,135 @@ describe("AgentGateway", () => {
         assert.equal(turn.dispatchOrigin, "agent");
         assert.equal(turn.message.text, "analyze the feature");
       }
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("binds spawnAs:subagent threads to the caller with a worker contract", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const response = yield* harness.callTool({
+        token: "token-parent",
+        name: "synara_create_threads",
+        args: {
+          requestId: "subagent-batch",
+          threads: [
+            {
+              prompt: "audit the sidebar tree",
+              target: { provider: "codex", model: "gpt-5.5" },
+              spawnAs: "subagent",
+              role: "auditor",
+              nickname: "Sifter",
+            },
+            {
+              prompt: "write the sidebar test",
+              target: { provider: "codex", model: "gpt-5.5" },
+              spawnAs: "subagent",
+              role: "implementer",
+            },
+          ],
+        },
+      });
+      assert.isFalse(isToolError(response.result), toolErrorText(response.result));
+
+      const creates = harness.dispatched.filter((command) => command.type === "thread.create");
+      const turns = harness.dispatched.filter((command) => command.type === "thread.turn.start");
+      assert.lengthOf(creates, 2);
+      assert.lengthOf(turns, 2);
+      for (const create of creates) {
+        if (create.type !== "thread.create") continue;
+        assert.equal(create.parentThreadId, "thread-parent");
+        assert.equal(create.sourceThreadId, "thread-parent");
+        assert.equal(create.sourceTurnId, "turn-parent-active");
+        assert.equal(create.creationSource, "synara_mcp");
+      }
+      const firstCreate = creates[0]!;
+      const secondCreate = creates[1]!;
+      if (firstCreate.type === "thread.create") {
+        assert.equal(firstCreate.subagentRole, "auditor");
+        assert.equal(firstCreate.subagentNickname, "Sifter");
+      }
+      if (secondCreate.type === "thread.create") {
+        assert.equal(secondCreate.subagentRole, "implementer");
+        assert.isNull(secondCreate.subagentNickname ?? null);
+      }
+      // The worker's first turn carries the contract preamble plus the task, not
+      // the bare task text standalone threads get.
+      for (const turn of turns) {
+        if (turn.type !== "thread.turn.start") continue;
+        assert.include(turn.message.text, "supervised worker");
+        assert.include(turn.message.text, "Assignment:");
+      }
+      const firstTurn = turns[0]!;
+      if (firstTurn.type === "thread.turn.start") {
+        assert.include(firstTurn.message.text, "audit the sidebar tree");
+      }
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("rejects role and nickname on standalone threads", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const response = yield* harness.callTool({
+        token: "token-parent",
+        name: "synara_create_threads",
+        args: {
+          requestId: "standalone-labels",
+          threads: [
+            {
+              prompt: "unlabeled standalone task",
+              target: { provider: "codex", model: "gpt-5.5" },
+              role: "auditor",
+            },
+          ],
+        },
+      });
+      assert.isTrue(isToolError(response.result));
+      assert.include(toolErrorText(response.result), 'spawnAs:"subagent"');
+      assert.lengthOf(harness.dispatched, 0);
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("rejects subagent creation past the nesting depth cap", () => {
+    // thread-deep sits at level 3 (root -> d1 -> d2 -> deep), so its child would
+    // exceed SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH.
+    const deepThreads = [
+      makeThreadShell("thread-deep-root"),
+      makeThreadShell("thread-deep-1", {
+        parentThreadId: ThreadId.makeUnsafe("thread-deep-root"),
+      }),
+      makeThreadShell("thread-deep-2", {
+        parentThreadId: ThreadId.makeUnsafe("thread-deep-1"),
+      }),
+      makeThreadShell("thread-deep", {
+        parentThreadId: ThreadId.makeUnsafe("thread-deep-2"),
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-deep-active"),
+          state: "running",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      }),
+    ];
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(deepThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const response = yield* harness.callTool({
+        token: "token-deep",
+        name: "synara_create_thread",
+        args: {
+          requestId: "too-deep",
+          prompt: "one level too many",
+          target: { provider: "codex", model: "gpt-5.5" },
+          spawnAs: "subagent",
+        },
+      });
+      assert.isTrue(isToolError(response.result));
+      assert.include(toolErrorText(response.result), "3 levels");
+      assert.lengthOf(harness.dispatched, 0);
     }).pipe(Effect.provide(gatewayLayer));
   });
 

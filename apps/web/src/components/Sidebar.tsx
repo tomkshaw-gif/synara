@@ -1632,6 +1632,18 @@ export default function Sidebar() {
   const [dismissedThreadStatusKeyByThreadId, setDismissedThreadStatusKeyByThreadId] = useState<
     Record<string, string>
   >(() => readSidebarUiState().dismissedThreadStatusKeyByThreadId);
+  // Per-parent disclosure for child (subagent) threads. Absent ids fall back to
+  // live-worker auto-reveal inside buildProjectThreadTree.
+  const [threadChildExpansionByThreadId, setThreadChildExpansionByThreadId] = useState<
+    ReadonlyMap<ThreadId, boolean>
+  >(
+    () =>
+      new Map(
+        Object.entries(readSidebarUiState().threadChildExpansionByThreadId).map(
+          ([threadId, expanded]) => [ThreadId.makeUnsafe(threadId), expanded] as const,
+        ),
+      ),
+  );
   const [lastThreadRoute, setLastThreadRoute] = useState(
     () => readSidebarUiState().lastThreadRoute,
   );
@@ -1662,6 +1674,13 @@ export default function Sidebar() {
           new Map(Object.entries(state.projectThreadListExtraPagesByCwd)),
         );
         setDismissedThreadStatusKeyByThreadId(state.dismissedThreadStatusKeyByThreadId);
+        setThreadChildExpansionByThreadId(
+          new Map(
+            Object.entries(state.threadChildExpansionByThreadId).map(
+              ([threadId, expanded]) => [ThreadId.makeUnsafe(threadId), expanded] as const,
+            ),
+          ),
+        );
         setLastThreadRoute(state.lastThreadRoute);
         setActivityViewEnabled(state.activityViewEnabled);
       }),
@@ -3381,6 +3400,7 @@ export default function Sidebar() {
         chatThreadListExtraPages,
         projectThreadListExtraPagesByCwd: Object.fromEntries(threadListExtraPagesByProjectCwd),
         dismissedThreadStatusKeyByThreadId,
+        threadChildExpansionByThreadId: Object.fromEntries(threadChildExpansionByThreadId),
         lastThreadRoute: nextLastThreadRoute,
         activityViewEnabled,
       });
@@ -3390,6 +3410,7 @@ export default function Sidebar() {
       chatSectionExpanded,
       chatThreadListExtraPages,
       dismissedThreadStatusKeyByThreadId,
+      threadChildExpansionByThreadId,
       threadListExtraPagesByProjectCwd,
     ],
   );
@@ -3987,6 +4008,7 @@ export default function Sidebar() {
         appSettings.sidebarThreadSortOrder,
       ),
       forceVisibleThreadId: activeSidebarThreadId ?? undefined,
+      childExpansionOverrides: threadChildExpansionByThreadId,
     });
   }, [
     activeSidebarThreadId,
@@ -3994,6 +4016,7 @@ export default function Sidebar() {
     chatSectionExpanded,
     chatProjects,
     sortedSidebarThreadsByProjectId,
+    threadChildExpansionByThreadId,
   ]);
   const visibleChatThreadIds = useMemo(
     () => visibleChatThreadRows.map((row) => row.thread.id),
@@ -4018,6 +4041,7 @@ export default function Sidebar() {
         appSettings.sidebarThreadSortOrder,
       ),
       forceVisibleThreadId: activeSidebarThreadId ?? undefined,
+      childExpansionOverrides: threadChildExpansionByThreadId,
     });
   }, [
     activeSidebarThreadId,
@@ -4026,6 +4050,7 @@ export default function Sidebar() {
     pinnedThreadIds,
     sortedSidebarThreadsByProjectId,
     studioProjects,
+    threadChildExpansionByThreadId,
   ]);
   const studioChatThreadIds = useMemo(
     () => studioChatThreadRows.map((row) => row.thread.id),
@@ -4135,6 +4160,7 @@ export default function Sidebar() {
         sortedSidebarThreadsByProjectId,
         pinnedThreadIds,
         threadListExtraPagesByProjectCwd,
+        threadChildExpansionOverrides: threadChildExpansionByThreadId,
         normalizeProjectCwd: normalizeSidebarProjectThreadListCwd,
         activeSidebarThreadId: activeSidebarThreadId ?? undefined,
         previewLimit: THREAD_PREVIEW_LIMIT,
@@ -4143,6 +4169,7 @@ export default function Sidebar() {
       }),
     [
       activeSidebarThreadId,
+      threadChildExpansionByThreadId,
       threadListExtraPagesByProjectCwd,
       pinnedThreadIds,
       sortedSidebarThreadsByProjectId,
@@ -4165,6 +4192,7 @@ export default function Sidebar() {
       sortedSidebarThreadsByProjectId,
       pinnedThreadIds,
       threadListExtraPagesByProjectCwd,
+      threadChildExpansionOverrides: threadChildExpansionByThreadId,
       normalizeProjectCwd: normalizeSidebarProjectThreadListCwd,
       activeSidebarThreadId: activeSidebarThreadId ?? undefined,
       previewLimit: THREAD_PREVIEW_LIMIT,
@@ -4174,6 +4202,7 @@ export default function Sidebar() {
   }, [
     activeSidebarThreadId,
     isOnStudio,
+    threadChildExpansionByThreadId,
     threadListExtraPagesByProjectCwd,
     pinnedThreadIds,
     sortedSidebarThreadsByProjectId,
@@ -4232,6 +4261,7 @@ export default function Sidebar() {
       chatThreadListExtraPages,
       projectThreadListExtraPagesByCwd: Object.fromEntries(threadListExtraPagesByProjectCwd),
       dismissedThreadStatusKeyByThreadId,
+      threadChildExpansionByThreadId: Object.fromEntries(threadChildExpansionByThreadId),
       lastThreadRoute,
       activityViewEnabled,
     });
@@ -4240,6 +4270,7 @@ export default function Sidebar() {
     chatSectionExpanded,
     chatThreadListExtraPages,
     dismissedThreadStatusKeyByThreadId,
+    threadChildExpansionByThreadId,
     threadListExtraPagesByProjectCwd,
     lastThreadRoute,
   ]);
@@ -4779,6 +4810,20 @@ export default function Sidebar() {
     );
   }
 
+  // `expanded` is the currently-resolved visibility; clicking writes the inverse
+  // as a persisted override, which also lets a manual collapse beat the
+  // live-worker auto-reveal.
+  const toggleThreadChildExpansion = useCallback(
+    (threadId: ThreadId, expanded: boolean) => {
+      setThreadChildExpansionByThreadId((current) => {
+        const next = new Map(current);
+        next.set(threadId, !expanded);
+        return next;
+      });
+    },
+    [setThreadChildExpansionByThreadId],
+  );
+
   function renderThreadRow(
     thread: SidebarThreadSummary,
     orderedProjectThreadIds: readonly ThreadId[],
@@ -4787,6 +4832,7 @@ export default function Sidebar() {
     // their top-level rows align flush like pinned rows instead of the indented
     // column used for project-nested threads.
     topLevel = false,
+    treeMeta?: { childCount: number; expanded: boolean; hasLiveDescendant: boolean },
   ) {
     const threadTerminalState = selectThreadTerminalState(terminalStateByThreadId, thread.id);
     const threadEntryPoint = threadTerminalState.entryPoint;
@@ -4913,6 +4959,17 @@ export default function Sidebar() {
               isActive={isActive}
               variant="standard"
               subagentIndentPx={subagentIndentPx}
+              childDisclosure={
+                treeMeta && treeMeta.childCount > 0
+                  ? {
+                      childCount: treeMeta.childCount,
+                      expanded: treeMeta.expanded,
+                      hasLiveDescendant: treeMeta.hasLiveDescendant,
+                      onToggle: () =>
+                        toggleThreadChildExpansion(thread.id, treeMeta.expanded),
+                    }
+                  : undefined
+              }
               pendingStatusColorClass={
                 threadStatus?.label === "Pending Approval" ? threadStatus.colorClass : null
               }
@@ -5187,7 +5244,11 @@ export default function Sidebar() {
               )}
             >
               {visibleEntries.map((entry) =>
-                renderThreadRow(entry.thread, orderedProjectThreadIds, entry.depth),
+                renderThreadRow(entry.thread, orderedProjectThreadIds, entry.depth, false, {
+                  childCount: entry.childCount,
+                  expanded: entry.expanded,
+                  hasLiveDescendant: entry.hasLiveDescendant,
+                }),
               )}
 
               {(canShowMoreThreads || canShowLessThreads) && (
@@ -6221,7 +6282,11 @@ export default function Sidebar() {
                   <SidebarMenu ref={attachProjectListAutoAnimateRef} className="gap-1">
                     {studioChatThreadRows.length > 0 ? (
                       studioChatThreadRows.map((row) =>
-                        renderThreadRow(row.thread, studioChatThreadIds, row.depth, true),
+                        renderThreadRow(row.thread, studioChatThreadIds, row.depth, true, {
+                          childCount: row.childCount,
+                          expanded: row.expanded,
+                          hasLiveDescendant: row.hasLiveDescendant,
+                        }),
                       )
                     ) : (
                       <div className="px-2 pt-4 text-center text-ui text-muted-foreground/58">
@@ -6462,6 +6527,11 @@ export default function Sidebar() {
                           visibleChatThreadIds,
                           entry.row.depth,
                           true,
+                          {
+                            childCount: entry.row.childCount,
+                            expanded: entry.row.expanded,
+                            hasLiveDescendant: entry.row.hasLiveDescendant,
+                          },
                         ),
                       )
                     ) : (

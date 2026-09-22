@@ -31,6 +31,16 @@ describe("Computer command with provider prompt formatting", () => {
       }),
     ).toBe("/computer-use Ultrathink:\nopen Calculator");
   });
+  it("keeps /orchestration first when Claude uses a prompt-injected effort", () => {
+    expect(
+      formatOutgoingComposerPrompt({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        effort: "ultrathink",
+        text: "/orchestration refactor the sidebar",
+      }),
+    ).toBe("/orchestration Ultrathink:\nrefactor the sidebar");
+  });
   it("keeps ordinary prompts and providers on their existing formatting path", () => {
     expect(
       formatOutgoingComposerPrompt({

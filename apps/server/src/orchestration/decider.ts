@@ -68,6 +68,7 @@ import {
   requireSpaceAssignableProject,
   requireSpaceNameAvailable,
   type SpaceAssignmentWorkspacePaths,
+  requireSubagentThreadParent,
   requireThread,
   requireThreadAbsent,
   requireThreadArchived,
@@ -1044,6 +1045,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      // Gateway-created subagents get their parent checked like the Auto-mode
+      // gate below; provider-native mirrors are replayed history, so rejecting
+      // them here would durably poison the runtime journal instead of
+      // preventing anything.
+      if (command.parentThreadId != null && command.creationSource !== "provider_native") {
+        yield* requireSubagentThreadParent({
+          readModel,
+          command,
+          parentThreadId: command.parentThreadId,
+          projectId: command.projectId,
+        });
+      }
       // Provider-native threads mirror subagents the provider already runs;
       // Synara never starts a session for them, so the Auto-mode capability
       // check can only reject the projection (and durably poison the runtime

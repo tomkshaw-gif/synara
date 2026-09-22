@@ -933,6 +933,16 @@ export function useComposerSlashCommands(input: {
         editorActions.scheduleComposerFocus();
         return true;
       }
+      if (slashInvocation.command === "orchestration") {
+        if (slashInvocation.args) return false; // The normal send freezes one-turn orchestration mode.
+        toastManager.add({
+          type: "info",
+          title: "Add a task after /orchestration",
+          description: "For example: /orchestration refactor the sidebar into modules.",
+        });
+        editorActions.scheduleComposerFocus();
+        return true;
+      }
       if (slashInvocation.command === "clear") {
         editorActions.clearComposerSlashDraft();
         await handleClearConversation();
@@ -1215,6 +1225,21 @@ export function useComposerSlashCommands(input: {
 
       if (item.command === "computer-use") {
         const replacement = "/computer-use ";
+        const applied = editorActions.applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (wasPromptReplacementApplied(applied)) {
+          editorActions.setComposerHighlightedItemId(null);
+          editorActions.scheduleComposerFocus();
+        }
+        return;
+      }
+
+      if (item.command === "orchestration") {
+        const replacement = "/orchestration ";
         const applied = editorActions.applyPromptReplacement(
           trigger.rangeStart,
           trigger.rangeEnd,

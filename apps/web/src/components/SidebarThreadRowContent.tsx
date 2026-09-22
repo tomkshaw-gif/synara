@@ -13,7 +13,7 @@ import { resolveSubagentPresentationForThread } from "../lib/subagentPresentatio
 import { resolveThreadHandoffBadgeLabel } from "../lib/threadHandoff";
 import { SIDEBAR_ROW_LABEL_TEXT_CLASS_NAME } from "../sidebarRowStyles";
 import type { SidebarThreadSummary } from "../types";
-import { TerminalIcon } from "../lib/icons";
+import { ChevronRightIcon, TerminalIcon } from "../lib/icons";
 import { cn } from "../lib/utils";
 import { ProviderIcon } from "./ProviderIcon";
 import { SidebarGlyph } from "./sidebarGlyphs";
@@ -171,6 +171,7 @@ export function SidebarThreadRowContent({
   isActive,
   variant,
   subagentIndentPx: subagentIndentPxProp,
+  childDisclosure,
   pendingStatusColorClass,
   suffix,
 }: {
@@ -181,6 +182,13 @@ export function SidebarThreadRowContent({
   isActive: boolean;
   variant: "pinned" | "standard";
   subagentIndentPx?: number;
+  /** Tree disclosure shown when the thread has child (subagent) rows. */
+  childDisclosure?: {
+    childCount: number;
+    expanded: boolean;
+    hasLiveDescendant: boolean;
+    onToggle: () => void;
+  } | undefined;
   pendingStatusColorClass?: string | null | undefined;
   suffix?: ReactNode;
 }) {
@@ -203,6 +211,48 @@ export function SidebarThreadRowContent({
 
   return (
     <>
+      {childDisclosure ? (
+        <button
+          type="button"
+          aria-label={
+            childDisclosure.expanded
+              ? `Hide ${childDisclosure.childCount} ${pluralize(childDisclosure.childCount, "worker thread")}`
+              : `Show ${childDisclosure.childCount} ${pluralize(childDisclosure.childCount, "worker thread")}`
+          }
+          aria-expanded={childDisclosure.expanded}
+          title={
+            childDisclosure.expanded
+              ? "Hide worker threads"
+              : `Show ${childDisclosure.childCount} ${pluralize(childDisclosure.childCount, "worker thread")}`
+          }
+          className={cn(
+            "inline-flex h-3.5 shrink-0 items-center gap-px rounded-sm text-muted-foreground/45 transition-colors hover:text-foreground",
+            childDisclosure.hasLiveDescendant && "text-muted-foreground/80",
+          )}
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            childDisclosure.onToggle();
+          }}
+        >
+          <ChevronRightIcon
+            className={cn(
+              "size-3 transition-transform duration-150",
+              childDisclosure.expanded && "rotate-90",
+            )}
+          />
+          <span
+            className={cn(
+              "text-ui-xs leading-none tabular-nums",
+              childDisclosure.hasLiveDescendant && "font-medium",
+            )}
+          >
+            {childDisclosure.childCount}
+          </span>
+        </button>
+      ) : null}
       {variant === "standard" && isSubagentThread ? (
         <span
           aria-hidden="true"

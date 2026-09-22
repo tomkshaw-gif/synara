@@ -23,6 +23,7 @@ import {
   ListTodoIcon,
   PaperclipIcon,
   WindowIcon,
+  WorkflowIcon,
 } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import {
@@ -41,6 +42,7 @@ const GLYPH = COMPOSER_MENU_PANEL_GLYPH_CLASS_NAME;
 const ROW_FILES = "extras:files";
 const ROW_WINDOW = "extras:window";
 const ROW_GOAL = "extras:goal";
+const ROW_ORCHESTRATION = "extras:orchestration";
 const ROW_PLAN = "extras:mode:plan";
 const ROW_DEBUG = "extras:mode:debug";
 const ROW_FAST = "extras:fast";
@@ -71,6 +73,8 @@ export function ComposerExtrasPanel(props: {
   onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   /** Turns the draft into a `/goal` command so the goal chip flow is the same as typing it. */
   onInsertGoal: () => void;
+  /** Prefixes the draft with `/orchestration` so the next send runs in orchestration mode. */
+  onInsertOrchestration: () => void;
   onClose: () => void;
   panelId: string;
 }) {
@@ -168,6 +172,12 @@ export function ComposerExtrasPanel(props: {
                 secondary: "Set a goal to keep pursuing",
               },
               {
+                id: ROW_ORCHESTRATION,
+                icon: <WorkflowIcon className={GLYPH} />,
+                title: "Orchestration",
+                secondary: "Split this task across supervised worker threads",
+              },
+              {
                 id: ROW_PLAN,
                 icon: <ListTodoIcon className={GLYPH} />,
                 title: "Plan mode",
@@ -225,6 +235,11 @@ export function ComposerExtrasPanel(props: {
     }
     if (rowId === ROW_GOAL) {
       props.onInsertGoal();
+      props.onClose();
+      return;
+    }
+    if (rowId === ROW_ORCHESTRATION) {
+      props.onInsertOrchestration();
       props.onClose();
       return;
     }

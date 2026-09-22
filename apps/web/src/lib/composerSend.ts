@@ -20,6 +20,10 @@ import {
 } from "@synara/shared/binaryTransfer";
 import { applyClaudePromptEffortPrefix, getModelCapabilities } from "@synara/shared/model";
 import { parseComputerInvocation } from "@synara/shared/computerInvocation";
+import {
+  ORCHESTRATION_SLASH_COMMAND,
+  parseOrchestrationInvocation,
+} from "@synara/shared/orchestrationInvocation";
 
 import {
   cloneComposerImageAttachment,
@@ -211,6 +215,14 @@ export function formatOutgoingComposerPrompt(params: {
         params.effort as ClaudeCodeEffort | null,
       );
       return `/computer-use ${prompt}`;
+    }
+    const orchestrationInvocation = parseOrchestrationInvocation(params.text);
+    if (orchestrationInvocation) {
+      const prompt = applyClaudePromptEffortPrefix(
+        orchestrationInvocation.prompt,
+        params.effort as ClaudeCodeEffort | null,
+      );
+      return `/${ORCHESTRATION_SLASH_COMMAND} ${prompt}`;
     }
     return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
   }

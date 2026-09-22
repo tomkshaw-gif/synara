@@ -317,6 +317,9 @@ export type SidebarProjectEntry = {
   rootRowId: ThreadId;
   thread: SidebarThreadSummary;
   depth: number;
+  childCount: number;
+  expanded: boolean;
+  hasLiveDescendant: boolean;
 };
 
 export type SidebarThreadHoverAnchorScope = "pinned" | "chat" | "project" | "activity";
@@ -889,17 +892,33 @@ export function resolveSidebarThreadListPaging(input: {
   };
 }
 
-export interface SidebarThreadTreeRow<
-  T extends Pick<SidebarThreadSummary, "id" | "parentThreadId">,
-> {
+// The extra picks let the tree decide auto-expansion from the same "actively
+// working" signal the status pill uses, so a collapsed parent still surfaces a
+// running worker without needing a second status definition.
+export type SidebarThreadTreeInput = Pick<
+  SidebarThreadSummary,
+  "id" | "parentThreadId"
+> &
+  Partial<
+    Pick<SidebarThreadSummary, "hasLiveTailWork" | "session" | "latestTurn">
+  >;
+
+export interface SidebarThreadTreeRow<T extends SidebarThreadTreeInput> {
   thread: T;
   depth: number;
   rootThreadId: T["id"];
+  /** Direct child threads; > 0 marks the row as a collapsible parent. */
+  childCount: number;
+  /** Whether the row's children render (manual override or auto-reveal). */
+  expanded: boolean;
+  /** A descendant is actively working; used to accent collapsed parents. */
+  hasLiveDescendant: boolean;
 }
 
-function collectActiveThreadAncestorIds<
-  T extends Pick<SidebarThreadSummary, "id" | "parentThreadId">,
->(threadById: Map<T["id"], T>, forceVisibleThreadId: T["id"] | undefined): Set<T["id"]> {
+function collectActiveThreadAncestorIds<T extends SidebarThreadTreeInput>(
+  threadById: Map<T["id"], T>,
+  forceVisibleThreadId: T["id"] | undefined,
+): Set<T["id"]> {
   const ancestorIds = new Set<T["id"]>();
   let currentThreadId = forceVisibleThreadId;
 
@@ -916,11 +935,12 @@ function collectActiveThreadAncestorIds<
 }
 
 // Build the project-local parent/child thread tree while preserving sort order from the input list.
-export function buildProjectThreadTree<
-  T extends Pick<SidebarThreadSummary, "id" | "parentThreadId">,
->(input: {
+// Expansion resolves as: the active thread's ancestors always reveal; a persisted override
+// pins open/shut; otherwise a parent opens while any descendant is actively working.
+export function buildProjectThreadTree<T extends SidebarThreadTreeInput>(input: {
   threads: readonly T[];
   forceVisibleThreadId?: T["id"] | undefined;
+  childExpansionOverrides?: ReadonlyMap<T["id"], boolean> | undefined;
 }): SidebarThreadTreeRow<T>[] {
   const { forceVisibleThreadId, threads } = input;
   const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
@@ -945,20 +965,56 @@ export function buildProjectThreadTree<
   }
 
   const activeThreadAncestorIds = collectActiveThreadAncestorIds(threadById, forceVisibleThreadId);
+  // Memoized bottom-up liveness over the children map; the ancestry set only guards
+  // against malformed parent cycles in imported data.
+  const liveSubtreeById = new Map<T["id"], boolean>();
+  const subtreeHasLiveThread = (thread: T, ancestry: ReadonlySet<T["id"]>): boolean => {
+    const cached = liveSubtreeById.get(thread.id);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (ancestry.has(thread.id)) {
+      return false;
+    }
+    const nextAncestry = new Set(ancestry).add(thread.id);
+    let live = isThreadActivelyWorking(thread);
+    if (!live) {
+      for (const child of childrenByParentId.get(thread.id) ?? []) {
+        if (subtreeHasLiveThread(child, nextAncestry)) {
+          live = true;
+          break;
+        }
+      }
+    }
+    liveSubtreeById.set(thread.id, live);
+    return live;
+  };
+  const EMPTY_ANCESTRY: ReadonlySet<T["id"]> = new Set();
   const orderedRows: SidebarThreadTreeRow<T>[] = [];
 
   const visit = (thread: T, depth: number, rootThreadId: T["id"]) => {
     const childThreads = childrenByParentId.get(thread.id) ?? [];
     const revealsActiveDescendant =
       childThreads.length > 0 && activeThreadAncestorIds.has(thread.id);
+    const expansionOverride = input.childExpansionOverrides?.get(thread.id);
+    const hasLiveDescendant = childThreads.some((child) =>
+      subtreeHasLiveThread(child, EMPTY_ANCESTRY),
+    );
+    const expanded =
+      revealsActiveDescendant ||
+      expansionOverride === true ||
+      (expansionOverride === undefined && hasLiveDescendant);
 
     orderedRows.push({
       thread,
       depth,
       rootThreadId,
+      childCount: childThreads.length,
+      expanded,
+      hasLiveDescendant,
     });
 
-    if (!revealsActiveDescendant) {
+    if (!expanded) {
       return;
     }
 
@@ -1435,6 +1491,7 @@ export function deriveSidebarProjectData(input: {
   sortedSidebarThreadsByProjectId: ReadonlyMap<ProjectId, SidebarThreadSummary[]>;
   pinnedThreadIds: readonly ThreadId[];
   threadListExtraPagesByProjectCwd: ReadonlyMap<string, number>;
+  threadChildExpansionOverrides?: ReadonlyMap<ThreadId, boolean> | undefined;
   normalizeProjectCwd: (cwd: string) => string;
   activeSidebarThreadId: ThreadId | undefined;
   previewLimit: number;
@@ -1480,6 +1537,9 @@ export function deriveSidebarProjectData(input: {
                 rootRowId: activeThread.id,
                 thread: activeThread,
                 depth: 0,
+                childCount: 0,
+                expanded: false,
+                hasLiveDescendant: false,
               },
             ];
 
@@ -1501,14 +1561,18 @@ export function deriveSidebarProjectData(input: {
     const projectThreadTree = buildProjectThreadTree({
       threads: projectThreads,
       forceVisibleThreadId: input.activeSidebarThreadId,
+      childExpansionOverrides: input.threadChildExpansionOverrides,
     });
     const orderedEntries: SidebarProjectEntry[] = projectThreadTree.map(
-      ({ thread, depth, rootThreadId }) => ({
+      ({ thread, depth, rootThreadId, childCount, expanded, hasLiveDescendant }) => ({
         kind: "thread",
         rowId: thread.id,
         rootRowId: rootThreadId,
         thread,
         depth,
+        childCount,
+        expanded,
+        hasLiveDescendant,
       }),
     );
 

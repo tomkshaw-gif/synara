@@ -100,6 +100,9 @@ function shouldKeepBuiltInSlashCommandDespiteNativeCollision(
     command === "default" ||
     command === "automation" ||
     command === "computer-use" ||
+    // /orchestration expands server-side into the Synara coordinator playbook;
+    // a provider-native namesake would leave the token unexpanded.
+    command === "orchestration" ||
     command === "export" ||
     command === "feedback" ||
     // /fork is app-owned everywhere: it creates a Synara thread with fork
@@ -226,6 +229,12 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
     command: "subagents",
     label: "/subagents",
     description: "Insert a prompt that asks the assistant to delegate work",
+    source: "app",
+  },
+  orchestration: {
+    command: "orchestration",
+    label: "/orchestration",
+    description: "Coordinate this task across supervised worker threads",
     source: "app",
   },
   "computer-use": {
@@ -402,6 +411,12 @@ export function buildSubagentsPrompt(existingPrompt: string): string {
   return trimmedPrompt.length > 0 ? `${trimmedPrompt}\n\n${cannedPrompt}` : cannedPrompt;
 }
 
+/** `/orchestration <task>` — the literal token stays in the message; the server expands it into the coordinator playbook. */
+export function buildOrchestrationSlashCommandPrompt(existingPrompt: string): string {
+  const trimmedPrompt = existingPrompt.trim();
+  return trimmedPrompt.length > 0 ? `/orchestration ${trimmedPrompt}` : "/orchestration ";
+}
+
 export function buildReviewPrompt(input: { target: "changes" | "base-branch" }): string {
   const baseInstruction =
     "Review the local code changes for bugs, risks, behavioural regressions, and missing tests. Findings first, ordered by severity.";
@@ -514,6 +529,7 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferSideCommand ? (["side"] as const) : []),
           "status",
           "subagents",
+          "orchestration",
           "computer-use",
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "goal",
@@ -535,6 +551,7 @@ export function getAvailableComposerSlashCommands(input: {
           "rename",
           "debug",
           "computer-use",
+          "orchestration",
           "default",
           "feedback",
           "automation",

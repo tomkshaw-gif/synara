@@ -8613,6 +8613,72 @@ describe("ProviderCommandReactor", () => {
     }
   });
 
+  it("expands a /orchestration turn into the coordinator playbook for the provider only", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("orchestration-invocation"),
+        threadId,
+        message: {
+          messageId: asMessageId("orchestration-message"),
+          role: "user",
+          text: "/orchestration split the refactor across workers",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        createdAt,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    const providerInput = harness.sendTurn.mock.calls[0]?.[0].input ?? "";
+    // The provider sees the playbook + task, never the literal command token.
+    expect(providerInput).toContain("Orchestration mode");
+    expect(providerInput).toContain("synara_create_threads");
+    expect(providerInput).toContain("spawnAs:\"subagent\"");
+    expect(providerInput).toContain("synara_wait_for_threads");
+    expect(providerInput).toContain("split the refactor across workers");
+    expect(providerInput).not.toContain("/orchestration");
+    // The durable user message keeps the literal command for transcript chips.
+    expect(
+      (await readHarnessThread(harness))?.messages.find(
+        (message) => message.id === asMessageId("orchestration-message"),
+      )?.text,
+    ).toBe("/orchestration split the refactor across workers");
+  });
+
+  it("leaves non-command turns untouched by the orchestration expansion", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("ordinary-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("ordinary-message"),
+          role: "user",
+          text: "just do the refactor yourself",
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    const providerInput = harness.sendTurn.mock.calls[0]?.[0].input ?? "";
+    expect(providerInput).toContain("just do the refactor yourself");
+    expect(providerInput).not.toContain("Orchestration mode");
+  });
+
   it("a frozen switch-off turn records no durable intent for the next ordinary turn", async () => {
     const manager = new ComputerManager({ backend: new FakeComputerBackend() });
     const harness = await createHarness({
