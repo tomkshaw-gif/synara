@@ -39,7 +39,7 @@ import {
   type ProviderOptions,
 } from "../../providerModelOptions";
 import { SearchIcon } from "~/lib/icons";
-import { starredModelKey } from "~/lib/starredModels";
+import { starredModelSlotKey } from "~/lib/starredModels";
 import { cn, isMacNavigatorPlatform } from "~/lib/utils";
 import { Input } from "../ui/input";
 import { Menu, MenuGroup, MenuGroupLabel } from "../ui/menu";
@@ -164,7 +164,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const effortControl = props.effortControl ?? "menu";
   const usesEffortSlider = effortControl === "slider";
 
-  const { starredModels, toggleStarredModel } = useStarredModels();
+  const { starredModels, toggleStarredModel, unstarModel } = useStarredModels();
   // A locked thread can only ever run its own provider's presets.
   const usableStarredModels =
     lockedProvider === null
@@ -305,7 +305,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           query: normalizedQuery,
           selectedModel: tab === activeProvider ? props.model : null,
         });
-  const starredKeySet = new Set(starredModels.map(starredModelKey));
+  const starredModelSlots = new Set(starredModels.map(starredModelSlotKey));
 
   // Devin patches normalize per family before merging: a Fusion family pick
   // must carry a concrete pairing uid (a bare `fusion` slug resolves to an
@@ -543,11 +543,12 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                     providerOptions={providerOptionsFor(row.provider)}
                     runtimeModels={props.runtimeModelsByProvider?.[row.provider]}
                     prompt={promptFor(row.provider)}
-                    starredKeySet={starredKeySet}
+                    starredModelSlots={starredModelSlots}
                     onSelect={selectRow}
                     // The footer slider owns effort in slider mode; rows stay plain.
                     onSelectEffort={usesEffortSlider ? null : selectRowWithEffort}
                     onToggleStar={toggleStarredModel}
+                    onUnstarModel={unstarModel}
                   />
                 ))}
               </div>
