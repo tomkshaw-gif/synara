@@ -260,8 +260,22 @@ describe("ComposerModelPicker", () => {
 
   it("shows the star on every starred model of the provider tab, whatever its traits", async () => {
     const screen = await mountPicker({}, { reasoningEffort: "medium" }, [
-      { provider: "codex", model: GPT_5_5, effort: "high", fastMode: false, thinking: null },
-      { provider: "codex", model: GPT_5_4, effort: "low", fastMode: true, thinking: null },
+      {
+        provider: "codex",
+        model: GPT_5_5,
+        effort: "high",
+        fastMode: false,
+        thinking: null,
+        modelVariant: null,
+      },
+      {
+        provider: "codex",
+        model: GPT_5_4,
+        effort: "low",
+        fastMode: true,
+        thinking: null,
+        modelVariant: null,
+      },
     ]);
     try {
       await page.getByRole("tab", { name: "Codex" }).click();
@@ -271,7 +285,14 @@ describe("ComposerModelPicker", () => {
       await page.getByRole("button", { name: "Remove GPT-5.4 from starred" }).click();
 
       expect(readStoredStars()).toEqual([
-        { provider: "codex", model: GPT_5_5, effort: "high", fastMode: false, thinking: null },
+        {
+          provider: "codex",
+          model: GPT_5_5,
+          effort: "high",
+          fastMode: false,
+          thinking: null,
+          modelVariant: null,
+        },
       ]);
     } finally {
       await screen.unmount();
