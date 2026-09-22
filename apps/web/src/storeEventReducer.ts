@@ -967,6 +967,8 @@ function applyOrchestrationEvent(
             nextCreateBranchFlowCompleted === (thread.createBranchFlowCompleted ?? false) &&
             (event.payload.isPinned === undefined ||
               event.payload.isPinned === (thread.isPinned ?? false)) &&
+            (event.payload.userStatus === undefined ||
+              event.payload.userStatus === (thread.userStatus ?? null)) &&
             (event.payload.settledAt === undefined ||
               (event.payload.settledAt ?? null) === (thread.settledAt ?? null)) &&
             (event.payload.parentThreadId === undefined ||
@@ -1009,6 +1011,9 @@ function applyOrchestrationEvent(
             associatedWorktreeRef: nextAssociatedWorktreeRef,
             createBranchFlowCompleted: nextCreateBranchFlowCompleted,
             ...(event.payload.isPinned !== undefined ? { isPinned: event.payload.isPinned } : {}),
+            ...(event.payload.userStatus !== undefined
+              ? { userStatus: event.payload.userStatus }
+              : {}),
             ...(event.payload.settledAt !== undefined
               ? { settledAt: event.payload.settledAt }
               : {}),

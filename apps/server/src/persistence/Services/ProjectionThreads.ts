@@ -23,6 +23,7 @@ import {
   ThreadCreationSource,
   ThreadEnvironmentMode,
   ThreadId,
+  ThreadUserStatus,
   TurnId,
 } from "@synara/contracts";
 import { Option, Schema, ServiceMap } from "effect";
@@ -89,6 +90,9 @@ export const ProjectionThread = Schema.Struct({
     Schema.withDecodingDefault(() => null),
   ),
   goalAchievements: Schema.optional(Schema.NullOr(ThreadGoalAchievements)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),

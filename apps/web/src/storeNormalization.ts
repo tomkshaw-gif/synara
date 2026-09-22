@@ -158,6 +158,7 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     (left.settledAt ?? null) === (right.settledAt ?? null) &&
     left.updatedAt === right.updatedAt &&
     (left.isPinned ?? false) === (right.isPinned ?? false) &&
+    (left.userStatus ?? null) === (right.userStatus ?? null) &&
     left.envMode === right.envMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
@@ -1705,6 +1706,7 @@ export function normalizeThreadFromReadModel(
     (previous.settledAt ?? null) === (incoming.settledAt ?? null) &&
     previous.updatedAt === incoming.updatedAt &&
     (previous.isPinned ?? false) === (incoming.isPinned ?? false) &&
+    (previous.userStatus ?? null) === (incoming.userStatus ?? null) &&
     previous.latestTurn === latestTurn &&
     previous.pendingSourceProposedPlan === pendingSourceProposedPlan &&
     previous.lastVisitedAt === lastVisitedAt &&
@@ -1765,6 +1767,7 @@ export function normalizeThreadFromReadModel(
     settledAt: incoming.settledAt ?? null,
     updatedAt: incoming.updatedAt,
     isPinned: incoming.isPinned ?? false,
+    userStatus: incoming.userStatus ?? null,
     latestTurn,
     ...(pendingSourceProposedPlan ? { pendingSourceProposedPlan } : {}),
     lastVisitedAt,
@@ -1896,6 +1899,7 @@ export function normalizeThreadShellSnapshot(
     settledAt: incoming.settledAt ?? null,
     updatedAt: incoming.updatedAt,
     isPinned: incoming.isPinned ?? false,
+    userStatus: incoming.userStatus ?? null,
     envMode: incoming.envMode ?? "local",
     branch: resolvedBranch,
     worktreePath: nextWorktreePath,

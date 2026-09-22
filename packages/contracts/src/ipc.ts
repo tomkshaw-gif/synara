@@ -309,12 +309,17 @@ export interface ContextMenuItem<T extends string = string> {
   destructive?: boolean;
   /** Central icon basename from the reversed set (e.g. `"pencil"`) or inline `<svg>` markup. */
   icon?: string;
+  /** Nested rows shown in a flyout submenu (supported one level deep). */
+  children?: readonly ContextMenuItem<T>[];
+  /** Renders a check/radio marker for the currently active choice. */
+  checked?: boolean;
 }
 
 /** Context menu row sent over the desktop bridge with its icon pre-rasterized by the renderer. */
 export interface DesktopContextMenuItem<T extends string = string> extends ContextMenuItem<T> {
   /** `data:image/png;base64,` template image rendered at 2x for a 16pt menu icon. */
   iconDataUrl?: string;
+  children?: readonly DesktopContextMenuItem<T>[];
 }
 
 export type DesktopUpdateStatus =

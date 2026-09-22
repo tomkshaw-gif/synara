@@ -7,6 +7,7 @@ import {
   type ProjectId,
   type PullRequestReviewRequestCountResult,
   type ThreadId,
+  type ThreadUserStatus,
 } from "@synara/contracts";
 import { pluralize } from "@synara/shared/text";
 import { resolveThreadEnvironmentMode } from "@synara/shared/threadEnvironment";
@@ -28,6 +29,7 @@ import {
   SIDEBAR_THREAD_ROW_BASE_CLASS_NAME,
 } from "../sidebarRowStyles";
 import { isDuplicateProjectCreateError } from "../lib/projectCreateRecovery";
+import { THREAD_USER_STATUS_META } from "../lib/threadUserStatus";
 import {
   canSessionAnswerPendingRequests,
   hasLiveLatestTurn,
@@ -346,12 +348,18 @@ export interface ThreadStatusPill {
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Todo"
+    | "In progress"
+    | "In review"
+    | "Done";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
   dismissible?: boolean;
   dismissalKey?: string;
+  /** Set when the pill represents the user-assigned status — renders the status glyph. */
+  userStatus?: ThreadUserStatus;
 }
 
 /**
@@ -385,17 +393,21 @@ export function resolveThreadStatusTrailingIndicator(input: {
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
-  Working: 3,
-  Connecting: 3,
-  "Plan Ready": 2,
-  Completed: 1,
+  "Pending Approval": 6,
+  "Awaiting Input": 5,
+  Working: 4,
+  Connecting: 4,
+  "Plan Ready": 3,
+  Completed: 2,
+  Todo: 1,
+  "In progress": 1,
+  "In review": 1,
+  Done: 1,
 };
 
 type ThreadStatusInput = Pick<
   Thread,
-  "interactionMode" | "latestTurn" | "lastVisitedAt" | "session" | "updatedAt"
+  "interactionMode" | "latestTurn" | "lastVisitedAt" | "session" | "updatedAt" | "userStatus"
 > & {
   proposedPlans?: Thread["proposedPlans"] | undefined;
   hasActionableProposedPlan?: boolean | undefined;
@@ -698,6 +710,22 @@ export function resolveThreadStatusPill(input: {
       pulse: false,
       dismissible: true,
       ...(dismissalKey ? { dismissalKey } : {}),
+    };
+  }
+
+  // User-assigned triage status sits below every runtime/attention pill: live work
+  // and unseen completions still surface, and the status color returns once the row
+  // is quiet again.
+  const userStatus = thread.userStatus ?? null;
+  if (userStatus !== null) {
+    const meta = THREAD_USER_STATUS_META[userStatus];
+    return {
+      label: meta.label,
+      colorClass: meta.colorClass,
+      dotClass: meta.dotClass,
+      pulse: false,
+      dismissible: false,
+      userStatus,
     };
   }
 

@@ -81,6 +81,8 @@ const harness = vi.hoisted(() => ({
   unpinThread: vi.fn(),
   prunePinnedThreads: vi.fn(),
   dispatchCommand: vi.fn(),
+  setThreadUserStatus: vi.fn(),
+  markThreadVisited: vi.fn(),
   confirm: vi.fn(),
   archiveThread: vi.fn(),
   unarchiveThread: vi.fn(),
@@ -175,6 +177,8 @@ vi.mock("../store", () => {
   useStore.getState = () => ({
     shellSnapshotSequence: harness.shellSnapshotSequence,
     removeDeletedThreadFromClientState: harness.removeDeletedThreadFromClientState,
+    setThreadUserStatus: harness.setThreadUserStatus,
+    markThreadVisited: harness.markThreadVisited,
   });
   useStore.subscribe = () => () => {};
   return { useStore };
@@ -267,6 +271,8 @@ beforeEach(() => {
     harness.unpinThread,
     harness.prunePinnedThreads,
     harness.dispatchCommand,
+    harness.setThreadUserStatus,
+    harness.markThreadVisited,
     harness.confirm,
     harness.archiveThread,
     harness.unarchiveThread,
@@ -367,6 +373,66 @@ describe("useSidebarThreadActions", () => {
     await vi.waitFor(() => expect(harness.unpinThread).toHaveBeenCalledTimes(1));
 
     expect(harness.pinThread).toHaveBeenCalledTimes(1);
+    expect(harness.toast).not.toHaveBeenCalled();
+  });
+
+  it("moves a thread to a status optimistically and marks it visited", async () => {
+    render().setThreadUserStatus(THREAD_ID, "in-review");
+    await vi.waitFor(() => expect(harness.dispatchCommand).toHaveBeenCalled());
+
+    expect(harness.setThreadUserStatus).toHaveBeenCalledWith(THREAD_ID, "in-review");
+    expect(harness.markThreadVisited).toHaveBeenCalledWith(THREAD_ID);
+    expect(harness.dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "thread.meta.update",
+        threadId: THREAD_ID,
+        userStatus: "in-review",
+      }),
+    );
+  });
+
+  it("clears a status without touching the visited marker", async () => {
+    render().setThreadUserStatus(THREAD_ID, null);
+    await vi.waitFor(() => expect(harness.dispatchCommand).toHaveBeenCalled());
+
+    expect(harness.setThreadUserStatus).toHaveBeenCalledWith(THREAD_ID, null);
+    expect(harness.markThreadVisited).not.toHaveBeenCalled();
+    expect(harness.dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thread.meta.update", userStatus: null }),
+    );
+  });
+
+  it("rolls the latest failed status write back to the confirmed value", async () => {
+    harness.dispatchCommand.mockRejectedValue(new Error("status rejected"));
+
+    render().setThreadUserStatus(THREAD_ID, "done");
+    await vi.waitFor(() => expect(harness.toast).toHaveBeenCalled());
+
+    // getThreadFromState is mocked to a bare {id} — confirmed status is null.
+    expect(harness.setThreadUserStatus).toHaveBeenNthCalledWith(2, THREAD_ID, null);
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Unable to update thread status" }),
+    );
+  });
+
+  it("does not let an older failed status write roll back a newer one", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: () => void;
+    harness.dispatchCommand
+      .mockImplementationOnce(() => new Promise((_, reject) => (rejectFirst = reject)))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (resolveSecond = resolve)));
+    const controller = render();
+
+    controller.setThreadUserStatus(THREAD_ID, "todo");
+    await vi.waitFor(() => expect(harness.dispatchCommand).toHaveBeenCalledTimes(1));
+    controller.setThreadUserStatus(THREAD_ID, "done");
+    await vi.waitFor(() => expect(harness.dispatchCommand).toHaveBeenCalledTimes(2));
+    resolveSecond();
+    rejectFirst(new Error("stale failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The stale rejection must not fire the revert: only the two optimistic writes happened.
+    expect(harness.setThreadUserStatus).toHaveBeenCalledTimes(2);
     expect(harness.toast).not.toHaveBeenCalled();
   });
 

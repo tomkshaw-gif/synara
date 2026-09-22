@@ -3,7 +3,7 @@
 // Layer: Web Sidebar controller hook
 // Exports: useSidebarThreadActions
 
-import { type ProjectId, ThreadId } from "@synara/contracts";
+import { type ProjectId, ThreadId, type ThreadUserStatus } from "@synara/contracts";
 import { pluralize } from "@synara/shared/text";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -133,6 +133,7 @@ export function useSidebarThreadActions(input: {
   const optimisticPinnedStateByThreadIdRef = useRef(new Map<ThreadId, boolean>());
   const latestPinnedMutationVersionByThreadIdRef = useRef(new Map<ThreadId, number>());
   const latestSettledMutationVersionByThreadIdRef = useRef(new Map<ThreadId, number>());
+  const latestUserStatusMutationVersionByThreadIdRef = useRef(new Map<ThreadId, number>());
   const settleOverrideExpiryTimeoutsRef = useRef(new Map<ThreadId, number>());
   const sidebarThreadSummaryByIdRef = useRef(sidebarThreadSummaryById);
   const [optimisticPinnedStateByThreadId, setOptimisticPinnedStateByThreadId] = useState<
@@ -239,6 +240,45 @@ export function useSidebarThreadActions(input: {
       });
     },
     [pinnedThreadIdSet, setThreadPinned],
+  );
+
+  const setThreadUserStatus = useCallback(
+    (threadId: ThreadId, userStatus: ThreadUserStatus | null) => {
+      const api = readNativeApi();
+      if (!api) return;
+      const requestVersion =
+        (latestUserStatusMutationVersionByThreadIdRef.current.get(threadId) ?? 0) + 1;
+      latestUserStatusMutationVersionByThreadIdRef.current.set(threadId, requestVersion);
+      // The optimistic write lands in the main store, so capture the confirmed value
+      // before patching — the summary ref follows the optimistic state, not the
+      // server's.
+      const previousUserStatus =
+        getThreadFromState(useStore.getState(), threadId)?.userStatus ?? null;
+      useStore.getState().setThreadUserStatus(threadId, userStatus);
+      // Choosing a status is itself a triage action: treat the thread as seen so a
+      // pending completion badge doesn't fight the fresh status marker.
+      if (userStatus !== null) {
+        useStore.getState().markThreadVisited(threadId);
+      }
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.meta.update",
+          commandId: newCommandId(),
+          threadId,
+          userStatus,
+        })
+        .catch((error) => {
+          if (
+            latestUserStatusMutationVersionByThreadIdRef.current.get(threadId) !== requestVersion
+          ) {
+            return;
+          }
+          useStore.getState().setThreadUserStatus(threadId, previousUserStatus);
+          console.error("Failed to update thread status", { threadId, error });
+          toastManager.add({ type: "error", title: "Unable to update thread status" });
+        });
+    },
+    [],
   );
 
   const [optimisticSettledMutationByThreadId, setOptimisticSettledMutationByThreadId] = useState<
@@ -862,6 +902,7 @@ export function useSidebarThreadActions(input: {
     pinnedThreadIds,
     pinnedThreadIdSet,
     toggleThreadPinned,
+    setThreadUserStatus,
     setThreadSettledWithToast,
     settledOverrideByThreadId: optimisticSettledStateByThreadId,
     deleteThread,

@@ -554,6 +554,7 @@ export function projectEvent(
             associatedWorktreeRef: isStudio ? null : payload.associatedWorktreeRef,
             createBranchFlowCompleted: isStudio ? false : payload.createBranchFlowCompleted,
             isPinned: payload.isPinned,
+            userStatus: payload.userStatus ?? null,
             parentThreadId: payload.parentThreadId,
             creationSource: payload.creationSource ?? null,
             sourceThreadId: payload.sourceThreadId ?? null,
@@ -731,6 +732,7 @@ export function projectEvent(
                   }
                 : {}),
               ...(payload.isPinned !== undefined ? { isPinned: payload.isPinned } : {}),
+              ...(payload.userStatus !== undefined ? { userStatus: payload.userStatus } : {}),
               ...(payload.settledAt !== undefined ? { settledAt: payload.settledAt } : {}),
               ...(payload.parentThreadId !== undefined
                 ? { parentThreadId: payload.parentThreadId }

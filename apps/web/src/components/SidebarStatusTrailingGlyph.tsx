@@ -3,6 +3,7 @@
 // Layer: Sidebar UI primitive
 
 import { cn } from "~/lib/utils";
+import { ThreadUserStatusIcon } from "../lib/threadUserStatus";
 import type { ThreadStatusPill } from "./Sidebar.logic";
 import { ThreadRunningSpinner } from "./ThreadRunningSpinner";
 
@@ -17,6 +18,13 @@ export function SidebarUnreadCompletionGlyph({ className }: { className?: string
 }
 
 export function SidebarStatusTrailingGlyph({ status }: { status: ThreadStatusPill }) {
+  if (status.userStatus !== undefined) {
+    return (
+      <span role="img" aria-label={status.label} className="inline-flex shrink-0">
+        <ThreadUserStatusIcon status={status.userStatus} />
+      </span>
+    );
+  }
   if (status.label === "Completed") {
     return <SidebarUnreadCompletionGlyph />;
   }

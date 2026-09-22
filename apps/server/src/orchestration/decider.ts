@@ -1070,6 +1070,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createBranchFlowCompleted:
             project.kind === "studio" ? false : command.createBranchFlowCompleted,
           isPinned: command.isPinned,
+          userStatus: command.userStatus ?? null,
           parentThreadId: command.parentThreadId,
           ...(command.creationSource !== undefined
             ? {
@@ -1147,6 +1148,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createBranchFlowCompleted:
             project.kind === "studio" ? false : command.createBranchFlowCompleted,
           isPinned: false,
+          userStatus: null,
           parentThreadId: null,
           subagentAgentId: null,
           subagentNickname: null,
@@ -1248,6 +1250,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createBranchFlowCompleted:
             project.kind === "studio" ? false : command.createBranchFlowCompleted,
           isPinned: false,
+          userStatus: null,
           parentThreadId: null,
           subagentAgentId: null,
           subagentNickname: null,
@@ -1528,6 +1531,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...resolveThreadWorkspaceMetadataPatch(project?.kind, command, thread),
           ...(command.isPinned !== undefined ? { isPinned: command.isPinned } : {}),
+          ...(command.userStatus !== undefined ? { userStatus: command.userStatus } : {}),
           ...(command.isSettled !== undefined
             ? { settledAt: command.isSettled ? occurredAt : null }
             : {}),

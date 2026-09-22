@@ -1346,6 +1346,65 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toBeNull();
   });
+
+  it("shows the user-assigned status when the row is quiet", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          userStatus: "in-review",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "In review", pulse: false, userStatus: "in-review" });
+  });
+
+  it("lets live work outrank the user-assigned status", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, userStatus: "done" },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("lets an unseen completion outrank the user-assigned status", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          userStatus: "todo",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Completed" });
+  });
+
+  it("lets pending approvals outrank the user-assigned status", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, userStatus: "in-progress" },
+        hasPendingApprovals: true,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Pending Approval" });
+  });
 });
 
 describe("resolveThreadRowClassName", () => {
@@ -1425,6 +1484,38 @@ describe("resolveProjectStatusIndicator", () => {
         },
       ]),
     ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+  });
+
+  it("keeps user-assigned statuses below every runtime pill", () => {
+    expect(
+      resolveProjectStatusIndicator([
+        {
+          label: "Done",
+          colorClass: "text-emerald-600",
+          dotClass: "bg-emerald-500",
+          pulse: false,
+          userStatus: "done",
+        },
+        {
+          label: "Completed",
+          colorClass: "text-emerald-600",
+          dotClass: "bg-emerald-500",
+          pulse: false,
+        },
+      ]),
+    ).toMatchObject({ label: "Completed" });
+    expect(
+      resolveProjectStatusIndicator([
+        null,
+        {
+          label: "Todo",
+          colorClass: "text-slate-500",
+          dotClass: "bg-slate-500",
+          pulse: false,
+          userStatus: "todo",
+        },
+      ]),
+    ).toMatchObject({ label: "Todo", userStatus: "todo" });
   });
 });
 

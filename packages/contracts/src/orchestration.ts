@@ -320,6 +320,10 @@ export const ThreadHandoffBootstrapStatus = Schema.Literals(["pending", "complet
 export type ThreadHandoffBootstrapStatus = typeof ThreadHandoffBootstrapStatus.Type;
 export const ThreadEnvironmentMode = Schema.Literals(["local", "worktree"]);
 export type ThreadEnvironmentMode = typeof ThreadEnvironmentMode.Type;
+// User-assigned triage status for a thread ("Move to Status" in the sidebar).
+// Orthogonal to runtime state and unread/completion state.
+export const ThreadUserStatus = Schema.Literals(["todo", "in-progress", "in-review", "done"]);
+export type ThreadUserStatus = typeof ThreadUserStatus.Type;
 
 export const OrchestrationMessageSource = Schema.Literals([
   "native",
@@ -877,6 +881,9 @@ export const OrchestrationThread = Schema.Struct({
   goal: Schema.optional(ThreadGoal),
   ...ThreadGoalTimingFields,
   goalAchievements: Schema.optional(ThreadGoalAchievements),
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   activities: Schema.Array(OrchestrationThreadActivity),
@@ -966,6 +973,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   handoff: Schema.NullOr(ThreadHandoff).pipe(Schema.withDecodingDefault(() => null)),
   goal: Schema.optional(ThreadGoal),
   ...ThreadGoalTimingFields,
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   session: Schema.NullOr(OrchestrationSession),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
@@ -1150,6 +1160,9 @@ const ThreadCreateCommand = Schema.Struct({
     Schema.withDecodingDefault(() => false),
   ),
   isPinned: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -1271,6 +1284,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   createBranchFlowCompleted: Schema.optional(Schema.Boolean),
   isPinned: Schema.optional(Schema.Boolean),
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)),
   // Desired settled state; the decider stamps the authoritative settledAt timestamp.
   isSettled: Schema.optional(Schema.Boolean),
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
@@ -1929,6 +1943,9 @@ export const ThreadCreatedPayload = Schema.Struct({
     Schema.withDecodingDefault(() => false),
   ),
   isPinned: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -2004,6 +2021,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   createBranchFlowCompleted: Schema.optional(Schema.Boolean),
   isPinned: Schema.optional(Schema.Boolean),
+  userStatus: Schema.optional(Schema.NullOr(ThreadUserStatus)),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   subagentAgentId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

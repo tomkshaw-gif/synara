@@ -4785,15 +4785,28 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     IPC.contextMenu,
     async (_event, items: DesktopContextMenuItem[], position?: { x: number; y: number }) => {
-      const normalizedItems = items
-        .filter((item) => typeof item.id === "string" && typeof item.label === "string")
-        .map((item) => ({
-          id: item.id,
-          label: item.label,
-          separatorBefore: item.separatorBefore === true,
-          destructive: item.destructive === true,
-          icon: createContextMenuIcon(item.iconDataUrl),
-        }));
+      type NormalizedContextMenuItem = {
+        id: string;
+        label: string;
+        separatorBefore: boolean;
+        destructive: boolean;
+        checked: boolean;
+        icon: Electron.NativeImage | undefined;
+        children: NormalizedContextMenuItem[] | undefined;
+      };
+      const normalizeItems = (list: DesktopContextMenuItem[]): NormalizedContextMenuItem[] =>
+        list
+          .filter((item) => typeof item.id === "string" && typeof item.label === "string")
+          .map((item) => ({
+            id: item.id,
+            label: item.label,
+            separatorBefore: item.separatorBefore === true,
+            destructive: item.destructive === true,
+            checked: item.checked === true,
+            icon: createContextMenuIcon(item.iconDataUrl),
+            children: Array.isArray(item.children) ? normalizeItems(item.children) : undefined,
+          }));
+      const normalizedItems = normalizeItems(items);
       if (normalizedItems.length === 0) {
         return null;
       }
@@ -4814,33 +4827,46 @@ function registerIpcHandlers(): void {
       if (!window) return null;
 
       return new Promise<string | null>((resolve) => {
-        const template: MenuItemConstructorOptions[] = [];
-        let hasInsertedDestructiveSeparator = false;
-        for (const item of normalizedItems) {
-          const shouldInsertSeparator =
-            item.separatorBefore ||
-            (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0);
-          if (shouldInsertSeparator && template.length > 0) {
-            template.push({ type: "separator" });
+        const buildMenuItems = (
+          list: NormalizedContextMenuItem[],
+        ): MenuItemConstructorOptions[] => {
+          const template: MenuItemConstructorOptions[] = [];
+          let hasInsertedDestructiveSeparator = false;
+          for (const item of list) {
+            const shouldInsertSeparator =
+              item.separatorBefore ||
+              (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0);
+            if (shouldInsertSeparator && template.length > 0) {
+              template.push({ type: "separator" });
+            }
+            if (item.destructive) {
+              hasInsertedDestructiveSeparator = true;
+            }
+            const itemOption: MenuItemConstructorOptions = {
+              label:
+                process.platform === "darwin"
+                  ? `${item.label}${MAC_CONTEXT_MENU_LABEL_TRAILING_PADDING}`
+                  : item.label,
+            };
+            const icon = item.icon ?? (item.destructive ? getDestructiveMenuIcon() : undefined);
+            if (icon) {
+              itemOption.icon = icon;
+            }
+            if (item.children && item.children.length > 0) {
+              itemOption.submenu = buildMenuItems(item.children);
+            } else {
+              itemOption.click = () => resolve(item.id);
+              if (item.checked) {
+                itemOption.type = "checkbox";
+                itemOption.checked = true;
+              }
+            }
+            template.push(itemOption);
           }
-          if (item.destructive) {
-            hasInsertedDestructiveSeparator = true;
-          }
-          const itemOption: MenuItemConstructorOptions = {
-            label:
-              process.platform === "darwin"
-                ? `${item.label}${MAC_CONTEXT_MENU_LABEL_TRAILING_PADDING}`
-                : item.label,
-            click: () => resolve(item.id),
-          };
-          const icon = item.icon ?? (item.destructive ? getDestructiveMenuIcon() : undefined);
-          if (icon) {
-            itemOption.icon = icon;
-          }
-          template.push(itemOption);
-        }
+          return template;
+        };
 
-        const menu = Menu.buildFromTemplate(template);
+        const menu = Menu.buildFromTemplate(buildMenuItems(normalizedItems));
         menu.popup({
           window,
           ...popupPosition,

@@ -33,6 +33,7 @@ import type {
   RuntimeMode,
   ThreadCreationSource,
   ThreadEnvironmentMode,
+  ThreadUserStatus,
 } from "@synara/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -279,6 +280,8 @@ export interface Thread extends ThreadWorkspaceState {
   hasPendingUserInput?: boolean;
   hasActionableProposedPlan?: boolean;
   pendingInteractions?: OrchestrationPendingInteraction[];
+  /** User-assigned triage status ("Move to Status"); independent of runtime/unread state. */
+  userStatus?: ThreadUserStatus | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
 }
@@ -328,6 +331,8 @@ export interface ThreadShell extends ThreadWorkspaceState {
   hasActionableProposedPlan?: boolean;
   pendingInteractions?: OrchestrationPendingInteraction[];
   lastVisitedAt?: string | undefined;
+  /** User-assigned triage status ("Move to Status"); independent of runtime/unread state. */
+  userStatus?: ThreadUserStatus | null;
 }
 
 export interface ThreadTurnState {
@@ -354,6 +359,8 @@ export interface SidebarThreadSummary {
   settledAt?: string | null;
   updatedAt?: string | undefined;
   isPinned?: boolean;
+  /** User-assigned triage status ("Move to Status"); independent of runtime/unread state. */
+  userStatus?: ThreadUserStatus | null;
   latestTurn: OrchestrationLatestTurn | null;
   lastVisitedAt?: string | undefined;
   parentThreadId?: ThreadId | null;

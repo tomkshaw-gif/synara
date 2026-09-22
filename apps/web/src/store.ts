@@ -10,6 +10,7 @@ import {
   type OrchestrationShellStreamEvent,
   type SpaceId,
   type ThreadId,
+  type ThreadUserStatus,
 } from "@synara/contracts";
 import { Debouncer } from "@tanstack/react-pacer";
 import { resolveThreadBranchRegressionGuard } from "@synara/shared/git";
@@ -88,6 +89,17 @@ export function markThreadUnread(state: AppState, threadId: ThreadId): AppState 
     const unreadVisitedAt = new Date(latestTurnCompletedAtMs - 1).toISOString();
     if (thread.lastVisitedAt === unreadVisitedAt) return thread;
     return { ...thread, lastVisitedAt: unreadVisitedAt };
+  });
+}
+
+export function setThreadUserStatus(
+  state: AppState,
+  threadId: ThreadId,
+  userStatus: ThreadUserStatus | null,
+): AppState {
+  return applyThreadUpdate(state, threadId, (thread) => {
+    if ((thread.userStatus ?? null) === userStatus) return thread;
+    return { ...thread, userStatus };
   });
 }
 
@@ -272,6 +284,7 @@ interface AppStore extends AppState {
   removeDeletedThreadFromClientState: (threadId: ThreadId) => void;
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId) => void;
+  setThreadUserStatus: (threadId: ThreadId, userStatus: ThreadUserStatus | null) => void;
   toggleProject: (projectId: Project["id"]) => void;
   setProjectExpanded: (projectId: Project["id"], expanded: boolean) => void;
   setAllProjectsExpanded: (expanded: boolean) => void;
@@ -322,6 +335,8 @@ export const useStore = create<AppStore>((set) => ({
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId) => set((state) => markThreadUnread(state, threadId)),
+  setThreadUserStatus: (threadId, userStatus) =>
+    set((state) => setThreadUserStatus(state, threadId, userStatus)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),

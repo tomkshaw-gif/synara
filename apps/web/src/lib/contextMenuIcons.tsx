@@ -18,12 +18,16 @@ import {
   TERMINAL_ICON_NAME,
   Trash2,
 } from "./icons";
+import { ThreadUserStatusIcon } from "./threadUserStatus";
+import type { ThreadUserStatus } from "@synara/contracts";
 
 export const THREAD_CONTEXT_MENU_ICONS = {
   rename: PENCIL_ICON_NAME,
   pin: PIN_ICON_NAME,
   clearNotification: BELL_ICON_NAME,
   markUnread: EYE_OPEN_ICON_NAME,
+  // Same glyph language as the sidebar status dot: a neutral dashed ring.
+  moveToStatus: renderToStaticMarkup(<ThreadUserStatusIcon status="todo" className="size-4" />),
   handoff: HANDOFF_ICON_NAME,
   copy: COPY_ICON_NAME,
   openInTerminal: TERMINAL_ICON_NAME,
@@ -32,3 +36,17 @@ export const THREAD_CONTEXT_MENU_ICONS = {
   // Same glyph as the delete rows in the sidebar project and space menus.
   delete: renderToStaticMarkup(<Trash2 />),
 } as const;
+
+const THREAD_USER_STATUS_MENU_ICON_MARKUP: Record<ThreadUserStatus, string> = {
+  todo: renderToStaticMarkup(<ThreadUserStatusIcon status="todo" className="size-4" />),
+  "in-progress": renderToStaticMarkup(
+    <ThreadUserStatusIcon status="in-progress" className="size-4" />,
+  ),
+  "in-review": renderToStaticMarkup(<ThreadUserStatusIcon status="in-review" className="size-4" />),
+  done: renderToStaticMarkup(<ThreadUserStatusIcon status="done" className="size-4" />),
+};
+
+/** Menu icon for a "Move to Status" submenu row — same glyph as the sidebar dot. */
+export function threadUserStatusMenuIcon(status: ThreadUserStatus): string {
+  return THREAD_USER_STATUS_MENU_ICON_MARKUP[status];
+}

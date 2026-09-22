@@ -117,6 +117,55 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
+  it.effect("round-trips the user-assigned status and clears it explicitly", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const threadId = ThreadId.makeUnsafe("thread-user-status");
+      const now = "2026-09-16T10:00:00.000Z";
+      const thread = {
+        threadId,
+        projectId: ProjectId.makeUnsafe("project-user-status"),
+        title: "User status",
+        modelSelection: { provider: "codex" as const, model: "gpt-5.6" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        envMode: "local" as const,
+        branch: null,
+        worktreePath: null,
+        associatedWorktreePath: null,
+        associatedWorktreeBranch: null,
+        associatedWorktreeRef: null,
+        createBranchFlowCompleted: false,
+        lastKnownPr: null,
+        latestTurnId: null,
+        handoff: null,
+        pinnedMessages: null,
+        notes: null,
+        goal: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+
+      // Old rows and callers omit the additive field: it decodes as null.
+      yield* threads.upsert(thread);
+      assert.isNull(Option.getOrNull(yield* threads.getById({ threadId }))?.userStatus);
+
+      yield* threads.upsert({ ...thread, userStatus: "in-review" as const });
+      assert.strictEqual(
+        Option.getOrNull(yield* threads.getById({ threadId }))?.userStatus,
+        "in-review",
+      );
+
+      yield* threads.upsert({ ...thread, userStatus: null });
+      assert.isNull(Option.getOrNull(yield* threads.getById({ threadId }))?.userStatus);
+    }),
+  );
+
   it.effect("clears active and soft-deleted project assignments for a deleted space", () =>
     Effect.gen(function* () {
       const projects = yield* ProjectionProjectRepository;

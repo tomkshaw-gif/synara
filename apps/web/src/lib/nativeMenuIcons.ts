@@ -63,9 +63,14 @@ export function withNativeMenuIcons<T extends string>(
 ): Promise<DesktopContextMenuItem<T>[]> {
   return Promise.all(
     items.map(async (item) => {
-      if (!item.icon) return item;
+      const children = item.children ? await withNativeMenuIcons(item.children) : undefined;
+      if (!item.icon) return children ? { ...item, children } : item;
       const iconDataUrl = await resolveIconDataUrl(item.icon);
-      return iconDataUrl ? { ...item, iconDataUrl } : item;
+      return {
+        ...item,
+        ...(iconDataUrl ? { iconDataUrl } : {}),
+        ...(children ? { children } : {}),
+      };
     }),
   );
 }

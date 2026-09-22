@@ -37,7 +37,12 @@ import {
 import { createCentralIconComponent } from "~/lib/central-icons";
 import { ThreadPrStatusBadge } from "~/components/pullRequest/ThreadPrStatusBadge";
 import { PinStatusIcon, pinActionLabel } from "~/lib/pin";
-import { THREAD_CONTEXT_MENU_ICONS } from "~/lib/contextMenuIcons";
+import { THREAD_CONTEXT_MENU_ICONS, threadUserStatusMenuIcon } from "~/lib/contextMenuIcons";
+import {
+  THREAD_USER_STATUSES,
+  THREAD_USER_STATUS_META,
+  isThreadUserStatus,
+} from "~/lib/threadUserStatus";
 import { ensureNativeApi } from "~/nativeApi";
 import { autoAnimate } from "@formkit/auto-animate";
 import { FiGitBranch } from "react-icons/fi";
@@ -1838,6 +1843,7 @@ export default function Sidebar() {
     pinnedThreadIds,
     pinnedThreadIdSet,
     toggleThreadPinned,
+    setThreadUserStatus,
     setThreadSettledWithToast,
     settledOverrideByThreadId,
     deleteThread,
@@ -3011,6 +3017,22 @@ export default function Sidebar() {
               ]
             : []),
           { id: "mark-unread", label: "Mark unread", icon: THREAD_CONTEXT_MENU_ICONS.markUnread },
+          {
+            id: "move-to-status",
+            label: "Move to Status",
+            icon: THREAD_CONTEXT_MENU_ICONS.moveToStatus,
+            children: [
+              ...THREAD_USER_STATUSES.map((status) => ({
+                id: `status:${status}`,
+                label: THREAD_USER_STATUS_META[status].label,
+                icon: threadUserStatusMenuIcon(status),
+                checked: (thread.userStatus ?? null) === status,
+              })),
+              ...((thread.userStatus ?? null) !== null
+                ? [{ id: "status:clear", label: "Clear status", separatorBefore: true }]
+                : []),
+            ],
+          },
           ...handoffItems,
           {
             id: "copy-path",
@@ -3069,6 +3091,13 @@ export default function Sidebar() {
       }
       if (clicked === "clear-notification") {
         clearThreadNotification(threadId);
+        return;
+      }
+      if (typeof clicked === "string" && clicked.startsWith("status:")) {
+        const statusValue = clicked.slice("status:".length);
+        if (statusValue === "clear" || isThreadUserStatus(statusValue)) {
+          setThreadUserStatus(threadId, statusValue === "clear" ? null : statusValue);
+        }
         return;
       }
       if (typeof clicked === "string" && clicked.startsWith("handoff:")) {
@@ -3207,6 +3236,7 @@ export default function Sidebar() {
       resolveThreadStatusForSidebar,
       serverSettingsQuery.data?.providers,
       sidebarThreadSummaryById,
+      setThreadUserStatus,
       toggleThreadPinned,
     ],
   );
@@ -3225,6 +3255,19 @@ export default function Sidebar() {
             label: `Mark unread (${count})`,
             icon: THREAD_CONTEXT_MENU_ICONS.markUnread,
           },
+          {
+            id: "move-to-status",
+            label: `Move to Status (${count})`,
+            icon: THREAD_CONTEXT_MENU_ICONS.moveToStatus,
+            children: [
+              ...THREAD_USER_STATUSES.map((status) => ({
+                id: `status:${status}`,
+                label: THREAD_USER_STATUS_META[status].label,
+                icon: threadUserStatusMenuIcon(status),
+              })),
+              { id: "status:clear", label: "Clear status", separatorBefore: true },
+            ],
+          },
           { id: "archive", label: `Archive (${count})`, icon: THREAD_CONTEXT_MENU_ICONS.archive },
           {
             id: "delete",
@@ -3242,6 +3285,18 @@ export default function Sidebar() {
           markThreadUnread(id);
         }
         clearSelection();
+        return;
+      }
+
+      if (typeof clicked === "string" && clicked.startsWith("status:")) {
+        const statusValue = clicked.slice("status:".length);
+        if (statusValue === "clear" || isThreadUserStatus(statusValue)) {
+          const nextStatus = statusValue === "clear" ? null : statusValue;
+          for (const id of ids) {
+            setThreadUserStatus(id, nextStatus);
+          }
+          clearSelection();
+        }
         return;
       }
 
@@ -3314,6 +3369,7 @@ export default function Sidebar() {
       markThreadUnread,
       removeFromSelection,
       selectedThreadIds,
+      setThreadUserStatus,
     ],
   );
 
@@ -4033,7 +4089,8 @@ export default function Sidebar() {
       const status = resolveProjectStatusIndicator(
         (sidebarThreadsByProjectId.get(project.id) ?? []).map(resolveThreadStatusForSidebar),
       );
-      if (!status) continue;
+      // User-assigned triage statuses are markers, not activity — they never light a space.
+      if (!status || status.userStatus !== undefined) continue;
       const tone: SpaceActivityTone =
         status.label === "Working" || status.label === "Connecting"
           ? "running"

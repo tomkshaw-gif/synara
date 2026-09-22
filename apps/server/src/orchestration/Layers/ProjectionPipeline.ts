@@ -577,6 +577,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               ? false
               : (event.payload.createBranchFlowCompleted ?? false),
             isPinned: event.payload.isPinned ?? false,
+            userStatus: event.payload.userStatus ?? null,
             parentThreadId: event.payload.parentThreadId ?? null,
             creationSource: event.payload.creationSource ?? null,
             sourceThreadId: event.payload.sourceThreadId ?? null,
@@ -681,6 +682,9 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                   }
                 : {}),
               ...(event.payload.isPinned !== undefined ? { isPinned: event.payload.isPinned } : {}),
+              ...(event.payload.userStatus !== undefined
+                ? { userStatus: event.payload.userStatus }
+                : {}),
               ...(event.payload.settledAt !== undefined
                 ? { settledAt: event.payload.settledAt }
                 : {}),
