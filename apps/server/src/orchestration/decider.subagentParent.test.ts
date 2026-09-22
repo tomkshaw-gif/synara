@@ -18,10 +18,7 @@ const PROJECT_ID = ProjectId.makeUnsafe("project-subagent");
 const OTHER_PROJECT_ID = ProjectId.makeUnsafe("project-other");
 const PARENT_ID = ThreadId.makeUnsafe("thread-parent");
 
-function makeThread(
-  id: string,
-  overrides?: Partial<OrchestrationThread>,
-): OrchestrationThread {
+function makeThread(id: string, overrides?: Partial<OrchestrationThread>): OrchestrationThread {
   return {
     id: ThreadId.makeUnsafe(id),
     projectId: PROJECT_ID,

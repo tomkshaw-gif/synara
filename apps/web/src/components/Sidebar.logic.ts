@@ -895,13 +895,8 @@ export function resolveSidebarThreadListPaging(input: {
 // The extra picks let the tree decide auto-expansion from the same "actively
 // working" signal the status pill uses, so a collapsed parent still surfaces a
 // running worker without needing a second status definition.
-export type SidebarThreadTreeInput = Pick<
-  SidebarThreadSummary,
-  "id" | "parentThreadId"
-> &
-  Partial<
-    Pick<SidebarThreadSummary, "hasLiveTailWork" | "session" | "latestTurn">
-  >;
+export type SidebarThreadTreeInput = Pick<SidebarThreadSummary, "id" | "parentThreadId"> &
+  Partial<Pick<SidebarThreadSummary, "hasLiveTailWork" | "session" | "latestTurn">>;
 
 export interface SidebarThreadTreeRow<T extends SidebarThreadTreeInput> {
   thread: T;

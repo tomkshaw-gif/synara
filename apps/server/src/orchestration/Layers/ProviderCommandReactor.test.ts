@@ -8640,7 +8640,7 @@ describe("ProviderCommandReactor", () => {
     // The provider sees the playbook + task, never the literal command token.
     expect(providerInput).toContain("Orchestration mode");
     expect(providerInput).toContain("synara_create_threads");
-    expect(providerInput).toContain("spawnAs:\"subagent\"");
+    expect(providerInput).toContain('spawnAs:"subagent"');
     expect(providerInput).toContain("synara_wait_for_threads");
     expect(providerInput).toContain("split the refactor across workers");
     expect(providerInput).not.toContain("/orchestration");

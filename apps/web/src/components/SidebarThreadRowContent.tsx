@@ -183,12 +183,14 @@ export function SidebarThreadRowContent({
   variant: "pinned" | "standard";
   subagentIndentPx?: number;
   /** Tree disclosure shown when the thread has child (subagent) rows. */
-  childDisclosure?: {
-    childCount: number;
-    expanded: boolean;
-    hasLiveDescendant: boolean;
-    onToggle: () => void;
-  } | undefined;
+  childDisclosure?:
+    | {
+        childCount: number;
+        expanded: boolean;
+        hasLiveDescendant: boolean;
+        onToggle: () => void;
+      }
+    | undefined;
   pendingStatusColorClass?: string | null | undefined;
   suffix?: ReactNode;
 }) {

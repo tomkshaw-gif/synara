@@ -572,9 +572,9 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             let ancestorId = caller!.parentThreadId ?? null;
             while (ancestorId !== null && callerDepth < SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH) {
               callerDepth += 1;
-              const ancestor = yield* snapshotQuery.getThreadShellById(ancestorId).pipe(
-                Effect.mapError((error) => new ToolInputError(errorText(error))),
-              );
+              const ancestor = yield* snapshotQuery
+                .getThreadShellById(ancestorId)
+                .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
               ancestorId = Option.isSome(ancestor) ? (ancestor.value.parentThreadId ?? null) : null;
             }
             if (callerDepth >= SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH) {
@@ -699,8 +699,8 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             // Subagent binding: the child hangs under the calling thread and its
             // first turn carries the worker contract instead of the bare task.
             parentThreadId: subagentParentThreadId,
-            subagentNickname: spawnAsSubagent ? (spec.nickname?.trim() || null) : null,
-            subagentRole: spawnAsSubagent ? (spec.role?.trim() || null) : null,
+            subagentNickname: spawnAsSubagent ? spec.nickname?.trim() || null : null,
+            subagentRole: spawnAsSubagent ? spec.role?.trim() || null : null,
             promptText: spawnAsSubagent
               ? buildSubagentWorkerPrompt({
                   task: spec.prompt,
@@ -1185,9 +1185,7 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                       ...(entry.subagentNickname !== null
                         ? { subagentNickname: entry.subagentNickname }
                         : {}),
-                      ...(entry.subagentRole !== null
-                        ? { subagentRole: entry.subagentRole }
-                        : {}),
+                      ...(entry.subagentRole !== null ? { subagentRole: entry.subagentRole } : {}),
                       ...(worktreePath !== null
                         ? {
                             associatedWorktreePath: worktreePath,

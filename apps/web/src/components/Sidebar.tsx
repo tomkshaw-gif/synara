@@ -4965,8 +4965,7 @@ export default function Sidebar() {
                       childCount: treeMeta.childCount,
                       expanded: treeMeta.expanded,
                       hasLiveDescendant: treeMeta.hasLiveDescendant,
-                      onToggle: () =>
-                        toggleThreadChildExpansion(thread.id, treeMeta.expanded),
+                      onToggle: () => toggleThreadChildExpansion(thread.id, treeMeta.expanded),
                     }
                   : undefined
               }
