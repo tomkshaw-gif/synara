@@ -24,6 +24,7 @@ import { type MessageId } from "@synara/contracts";
 import { type LegendListRef } from "@legendapp/list/react";
 import { useLayoutEffect, useRef, type RefObject } from "react";
 
+import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
 import { ANCHOR_SLIDE_DURATION_MS, anchorSlideOffsetPx } from "./transcriptScroll";
 
 // Absolute bound on the slide plus its hold, so a transcript that never stops
@@ -44,11 +45,13 @@ const ANCHOR_MOUNT_MAX_WAIT_MS = 1_000;
 // hands off to follow-the-tail, so a one-frame reserve recompute in the middle
 // of a stream cannot end the hold early.
 const ANCHOR_OVERFLOW_HANDOFF_FRAMES = 3;
-// How far past the viewport bottom the transcript may sit while the anchor is
-// held before that counts as overflow. While the reserve is doing its job the
-// tail sits exactly at the viewport bottom, so this only has to cover
-// reserve-recompute rounding.
-const ANCHOR_OVERFLOW_SLACK_PX = 8;
+// How far the live tail may extend past the anchor-hold coordinate before the
+// hold hands off to follow-the-tail. Hosted Linux can report the end ~20px
+// short of the DOM after the last streamed chunk; handing off on that gap
+// scrolls the sent message off its anchor. A response that has actually
+// filled the viewport is well past the same distance follow already treats
+// as "still at the bottom".
+const ANCHOR_OVERFLOW_SLACK_PX = AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
 // A freshly committed row can report a transient position for one frame before
 // the list assigns its real offset. The first move of the slide waits for the
 // row's content position to repeat, but no longer than this.

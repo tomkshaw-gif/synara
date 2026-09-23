@@ -439,18 +439,36 @@ export function useChatTranscriptScroll({
     }
     // Re-apply the bottom stick only for real transcript messages; tool/work
     // rows can arrive quickly and should not churn scroll/layout work.
-    const frameId = window.requestAnimationFrame(() => {
-      // The tail-anchor slide owns the scroll after a send; a re-snap here
-      // would hard-jump past the smooth slide mid-flight. Once the anchor
-      // settles the spacer keeps the end position exact, so nothing is missed.
-      if (tailAnchorScrollInFlightRef.current || isUserScrollDetachedRef.current) {
+    // LegendList can settle an end-scroll against a stale row estimate and
+    // leave a few dozen pixels. Keep pinning the DOM end for a handful of
+    // frames after the estimate catches up. The tail-anchor slide owns the
+    // scroll after a send; a re-snap here would hard-jump past that glide.
+    let cancelled = false;
+    let attempts = 0;
+    let frameId = 0;
+    const stickToEnd = () => {
+      if (cancelled || tailAnchorScrollInFlightRef.current || isUserScrollDetachedRef.current) {
         return;
       }
-      const shouldAnimate = animateNextAutoFollowScrollRef.current;
-      animateNextAutoFollowScrollRef.current = false;
-      scrollToEnd(shouldAnimate);
-    });
+      const node = legendListRef.current?.getScrollableNode?.();
+      if (attempts === 0) {
+        const shouldAnimate = animateNextAutoFollowScrollRef.current;
+        animateNextAutoFollowScrollRef.current = false;
+        scrollToEnd(shouldAnimate);
+      } else if (node instanceof HTMLElement && !isScrollContainerNearBottom(node, 1)) {
+        programmaticScrollUntilRef.current = performance.now() + 200;
+        node.scrollTop = node.scrollHeight;
+      }
+      attempts += 1;
+      // Keep watching a few frames. The list can apply its estimated end, then
+      // replace that height a frame later and reopen the gap.
+      if (attempts < 8) {
+        frameId = window.requestAnimationFrame(stickToEnd);
+      }
+    };
+    frameId = window.requestAnimationFrame(stickToEnd);
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(frameId);
     };
   }, [activeThreadId, scrollToEnd, transcriptAutoFollowSignal]);
