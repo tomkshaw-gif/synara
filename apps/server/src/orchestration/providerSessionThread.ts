@@ -21,8 +21,8 @@ export function isSyntheticProviderSubagentThreadId(threadId: string): boolean {
  */
 export function threadOwnsProviderSession(thread: {
   readonly id: string;
-  readonly parentThreadId?: string | null;
-  readonly creationSource?: string | null;
+  readonly parentThreadId?: string | null | undefined;
+  readonly creationSource?: string | null | undefined;
 }): boolean {
   // Synthetic ids share the parent even when parentThreadId was not persisted.
   // The resolver then finds that parent from the id prefix.
