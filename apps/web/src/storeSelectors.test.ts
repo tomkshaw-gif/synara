@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MessageId, ProjectId, ThreadId } from "@synara/contracts";
+import { FUSION_SIDEKICK_ROLE } from "@synara/shared/fusionInvocation";
 
 import type { AppState } from "./store";
 import {
@@ -263,6 +264,43 @@ describe("sidebar thread visibility", () => {
   it("always hides side chats, including pinned side chats", () => {
     expect(isSidebarThreadVisible(sidechatSummary)).toBe(false);
     expect(isSidebarThreadVisible(sidechatSummary, { hideAutomationRunThreads: true })).toBe(false);
+  });
+
+  it("hides a fusion sidekick and keeps an ordinary worker", () => {
+    const sidekickSummary = {
+      ...summaryA,
+      id: "thread-sidekick" as ThreadId,
+      parentThreadId: threadIdC,
+      subagentRole: FUSION_SIDEKICK_ROLE,
+      isPinned: true,
+    } as SidebarThreadSummary;
+    const workerSummary = {
+      ...summaryA,
+      id: "thread-worker" as ThreadId,
+      parentThreadId: threadIdC,
+      subagentRole: "implementer",
+    } as SidebarThreadSummary;
+    expect(isSidebarThreadVisible(sidekickSummary)).toBe(false);
+    expect(isSidebarThreadVisible(workerSummary)).toBe(true);
+    const waitingOnApproval = { ...sidekickSummary, hasPendingApprovals: true };
+    const waitingOnInput = {
+      ...sidekickSummary,
+      id: "thread-sidekick-input" as ThreadId,
+      hasPendingUserInput: true,
+    };
+    expect(isSidebarThreadVisible(waitingOnApproval)).toBe(true);
+    expect(isSidebarThreadVisible(waitingOnInput)).toBe(true);
+
+    const selectTree = createSidebarTreeThreadsSelector();
+    const treeState = makeState({
+      threadIds: [threadIdC, sidekickSummary.id, workerSummary.id],
+      sidebarThreadSummaryById: {
+        [threadIdC]: normalSummary,
+        [sidekickSummary.id]: sidekickSummary,
+        [workerSummary.id]: workerSummary,
+      },
+    });
+    expect(selectTree(treeState).map((thread) => thread.id)).toEqual([threadIdC, workerSummary.id]);
   });
 
   it("filters run threads out of the display and tree selectors", () => {

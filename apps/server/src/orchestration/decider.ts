@@ -37,6 +37,7 @@ import { Effect } from "effect";
 import { computerActivationMetadata } from "../computer/computerActivation.ts";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { threadOwnsProviderSession } from "./providerSessionThread.ts";
 import { withProjectRelocationEvents } from "./projectRelocation.ts";
 import { buildForkThreadTitle } from "./forkThreadTitle.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
@@ -1849,13 +1850,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         targetThread.session?.providerName ?? targetThread.modelSelection.provider;
       const isThreadRunning =
         targetThread.session?.status === "running" && targetThread.session.activeTurnId !== null;
-      // Subagent threads never queue: their messages steer the running child task
-      // through the parent session, so deferring until the turn settles would
-      // deliver the message only after the subagent already finished.
+      // Native subagent mirrors steer the running child task through the parent
+      // session, so queueing until that turn settles would deliver the message
+      // after the subagent already finished. Gateway workers own a provider
+      // session and follow the same queue rules as a standalone chat.
       // Steers ride the live turn natively only on providers whose runtime can
       // inject mid-turn input; everywhere else they queue and interrupt below.
+      const sharesParentProviderSession = !threadOwnsProviderSession(targetThread);
       const shouldQueue =
-        targetThread.parentThreadId === null &&
+        !sharesParentProviderSession &&
         (targetThread.claudeCacheReview != null ||
           (isThreadRunning &&
             (dispatchMode === "queue" || !providerSupportsNativeTurnSteering(activeProvider))));

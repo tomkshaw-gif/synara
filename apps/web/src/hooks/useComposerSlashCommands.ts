@@ -13,6 +13,7 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@synara/contracts";
+import { parseFusionInvocation } from "@synara/shared/fusionInvocation";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
@@ -943,6 +944,20 @@ export function useComposerSlashCommands(input: {
         editorActions.scheduleComposerFocus();
         return true;
       }
+      if (slashInvocation.command === "fusion") {
+        const fusion = parseFusionInvocation(trimmed);
+        // A named sidekick plus a task sends. The server expands the playbook.
+        if (fusion?.sidekick && fusion.prompt.trim().length > 0) return false;
+        toastManager.add({
+          type: "info",
+          title: fusion?.sidekick ? "Add a task after the sidekick" : "Pick a sidekick model",
+          description: fusion?.sidekick
+            ? "For example: /fusion sidekick:codex/gpt-5.4-mini fix the failing test."
+            : "Open + and choose Fusion, or write /fusion sidekick:codex/gpt-5.4-mini and the task. This thread's model stays the lead.",
+        });
+        editorActions.scheduleComposerFocus();
+        return true;
+      }
       if (slashInvocation.command === "clear") {
         editorActions.clearComposerSlashDraft();
         await handleClearConversation();
@@ -1240,6 +1255,21 @@ export function useComposerSlashCommands(input: {
 
       if (item.command === "orchestration") {
         const replacement = "/orchestration ";
+        const applied = editorActions.applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (wasPromptReplacementApplied(applied)) {
+          editorActions.setComposerHighlightedItemId(null);
+          editorActions.scheduleComposerFocus();
+        }
+        return;
+      }
+
+      if (item.command === "fusion") {
+        const replacement = "/fusion ";
         const applied = editorActions.applyPromptReplacement(
           trigger.rangeStart,
           trigger.rangeEnd,

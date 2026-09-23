@@ -196,19 +196,6 @@ export function SidebarThreadRowContent({
 }) {
   const subagentIndentPx = subagentIndentPxProp ?? 0;
   const isSubagentThread = Boolean(thread.parentThreadId);
-  const subagentPresentation =
-    variant === "standard" && isSubagentThread
-      ? resolveSubagentPresentationForThread({
-          thread: {
-            id: thread.id,
-            parentThreadId: thread.parentThreadId,
-            subagentAgentId: thread.subagentAgentId,
-            subagentNickname: thread.subagentNickname,
-            subagentRole: thread.subagentRole,
-            title: thread.title,
-          },
-        })
-      : null;
   const showThreadProviderAvatar = !isGenericChatThreadTitle(thread.title);
 
   return (
@@ -257,15 +244,12 @@ export function SidebarThreadRowContent({
       ) : null}
       {variant === "standard" && isSubagentThread ? (
         <span
-          aria-hidden="true"
-          className="relative inline-flex h-3.5 w-[18px] shrink-0 items-center"
+          className="inline-flex size-3.5 shrink-0 items-center justify-center"
           style={{ marginLeft: `${subagentIndentPx}px` }}
         >
-          <span className="absolute left-1.5 top-0 bottom-0 w-px rounded-full bg-border/35" />
-          <span className="absolute left-1.5 top-1/2 h-px w-2.5 -translate-y-1/2 bg-border/35" />
-          <span
-            className="absolute left-1.5 top-1/2 size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-            style={{ backgroundColor: subagentPresentation?.accentColor }}
+          <ProviderIcon
+            provider={thread.session?.provider ?? thread.modelSelection.provider}
+            className="size-3 shrink-0"
           />
         </span>
       ) : terminalEntryPoint ? (

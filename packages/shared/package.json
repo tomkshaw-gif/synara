@@ -16,6 +16,10 @@
       "types": "./src/orchestrationInvocation.ts",
       "import": "./src/orchestrationInvocation.ts"
     },
+    "./fusionInvocation": {
+      "types": "./src/fusionInvocation.ts",
+      "import": "./src/fusionInvocation.ts"
+    },
     "./modelImageBudget": {
       "types": "./src/modelImageBudget.ts",
       "import": "./src/modelImageBudget.ts"

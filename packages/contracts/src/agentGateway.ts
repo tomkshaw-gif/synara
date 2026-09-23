@@ -86,7 +86,9 @@ export const SynaraCreateThreadSpec = Schema.Struct({
   // "subagent" binds the thread to the calling thread (parentThreadId) so it
   // nests under it as a supervised worker. Only provider sessions can spawn
   // subagents; external clients have no caller thread.
-  spawnAs: Schema.optional(Schema.Literals(["standalone", "subagent"])),
+  // "sidekick" is the hidden /fusion worker. It binds like a subagent and
+  // rejects caller-supplied role and nickname.
+  spawnAs: Schema.optional(Schema.Literals(["standalone", "subagent", "sidekick"])),
   role: Schema.optional(
     Schema.String.check(Schema.isNonEmpty()).check(
       Schema.isMaxLength(SYNARA_GATEWAY_MAX_SUBAGENT_LABEL_LENGTH),

@@ -27,6 +27,7 @@ import {
   ThreadId,
   TurnId,
 } from "@synara/contracts";
+import { FUSION_SIDEKICK_NICKNAME, FUSION_SIDEKICK_ROLE } from "@synara/shared/fusionInvocation";
 import { isTemporaryWorktreeBranch } from "@synara/shared/git";
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -2696,6 +2697,69 @@ describe("AgentGateway", () => {
       if (firstTurn.type === "thread.turn.start") {
         assert.include(firstTurn.message.text, "audit the sidebar tree");
       }
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("binds spawnAs:sidekick as a hidden fusion worker", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const response = yield* harness.callTool({
+        token: "token-parent",
+        name: "synara_create_threads",
+        args: {
+          requestId: "fusion-sidekick",
+          threads: [
+            {
+              prompt: "fix the failing test",
+              target: { provider: "codex", model: "gpt-5.5" },
+              spawnAs: "sidekick",
+            },
+          ],
+        },
+      });
+      assert.isFalse(isToolError(response.result), toolErrorText(response.result));
+
+      const create = harness.dispatched.find((command) => command.type === "thread.create");
+      const turn = harness.dispatched.find((command) => command.type === "thread.turn.start");
+      assert.equal(create?.type, "thread.create");
+      assert.equal(turn?.type, "thread.turn.start");
+      if (create?.type === "thread.create") {
+        assert.equal(create.parentThreadId, "thread-parent");
+        assert.equal(create.subagentRole, FUSION_SIDEKICK_ROLE);
+        assert.equal(create.subagentNickname, FUSION_SIDEKICK_NICKNAME);
+        assert.equal(create.modelSelection.model, "gpt-5.5");
+      }
+      if (turn?.type === "thread.turn.start") {
+        assert.include(turn.message.text, "You are the sidekick");
+        assert.include(turn.message.text, "fix the failing test");
+        assert.notInclude(turn.message.text, "supervised worker");
+      }
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("rejects role and nickname on a fusion sidekick", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads);
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const response = yield* harness.callTool({
+        token: "token-parent",
+        name: "synara_create_threads",
+        args: {
+          requestId: "fusion-labeled",
+          threads: [
+            {
+              prompt: "fix the failing test",
+              target: { provider: "codex", model: "gpt-5.5" },
+              spawnAs: "sidekick",
+              nickname: "Scout",
+            },
+          ],
+        },
+      });
+      assert.isTrue(isToolError(response.result));
+      assert.include(toolErrorText(response.result), 'spawnAs:"sidekick"');
+      assert.lengthOf(harness.dispatched, 0);
     }).pipe(Effect.provide(gatewayLayer));
   });
 

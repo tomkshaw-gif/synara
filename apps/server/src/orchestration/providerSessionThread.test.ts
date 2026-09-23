@@ -73,4 +73,53 @@ describe("resolveProviderSessionThread", () => {
     expect(childMutationStarted).toBe(true);
     expect(getThreadShellById).toHaveBeenCalledWith(parentId);
   });
+
+  it("starts a supervised worker without waiting for the parent session lease", async () => {
+    const parentId = "thread-parent" as ThreadId;
+    const childId = "agent-worker" as ThreadId;
+    const parent = { id: parentId, parentThreadId: null } as OrchestrationThreadShell;
+    const child = {
+      id: childId,
+      parentThreadId: parentId,
+      creationSource: "synara_mcp",
+    } as OrchestrationThreadShell;
+    const projectionSnapshotQuery = {
+      getThreadShellById: (threadId: ThreadId) =>
+        Effect.succeed(Option.some(threadId === childId ? child : parent)),
+      findSyntheticSubagentParentThread: () => Effect.succeed(Option.none()),
+    } as unknown as ProjectionSnapshotQueryShape;
+
+    let workerMutationStarted = false;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const coordinator = yield* TurnCheckpointCoordinator;
+          const parentLeaseAcquired = yield* Deferred.make<void>();
+          const releaseParentLease = yield* Deferred.make<void>();
+          yield* Effect.forkScoped(
+            coordinator.withThreadLease(
+              parentId,
+              Deferred.succeed(parentLeaseAcquired, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseParentLease)),
+              ),
+            ),
+          );
+          yield* Deferred.await(parentLeaseAcquired);
+
+          yield* resolveProviderSessionThread(projectionSnapshotQuery, childId).pipe(
+            Effect.flatMap((providerThread) =>
+              coordinator.withThreadLease(
+                providerThread?.id ?? childId,
+                Effect.sync(() => {
+                  workerMutationStarted = true;
+                }),
+              ),
+            ),
+          );
+          expect(workerMutationStarted).toBe(true);
+          yield* Deferred.succeed(releaseParentLease, undefined);
+        }),
+      ).pipe(Effect.provide(TurnCheckpointCoordinatorLive)),
+    );
+  });
 });

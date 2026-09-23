@@ -21,6 +21,7 @@ import {
   MessageCircleIcon,
   Minimize2,
   TemporaryThreadIcon,
+  UsersIcon,
   WorkflowIcon,
 } from "./icons";
 
@@ -41,6 +42,7 @@ export const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   status: InfoIcon,
   subagents: BotIcon,
   orchestration: WorkflowIcon,
+  fusion: UsersIcon,
   feedback: BugIcon,
   automation: ClockIcon,
   goal: GoalIcon,

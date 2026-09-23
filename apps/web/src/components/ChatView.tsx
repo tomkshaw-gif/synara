@@ -95,6 +95,7 @@ import {
 } from "../composerDraftStore";
 import { useComposerFocusRequestStore } from "../composerFocusRequestStore";
 import {
+  buildFusionSlashCommandPrompt,
   buildGoalSlashCommandPrompt,
   buildOrchestrationSlashCommandPrompt,
   canExecuteSideSlashCommand,
@@ -4493,6 +4494,16 @@ export default function ChatView({
     scheduleComposerFocus();
   }, [promptRef, scheduleComposerFocus, setComposerPromptValue]);
 
+  // The `+` Fusion picker writes the sidekick token. This thread's model stays
+  // the lead; the server expands the command into the lead playbook.
+  const insertFusionSlashCommandInComposer = useCallback(
+    (target: { provider: ProviderKind; model: string }) => {
+      setComposerPromptValue(buildFusionSlashCommandPrompt(target, promptRef.current));
+      scheduleComposerFocus();
+    },
+    [promptRef, scheduleComposerFocus, setComposerPromptValue],
+  );
+
   // Prefills a literal goal so editing reuses the same slash-command path
   // that created the goal, mirroring how queued turns restore into the composer.
   const editThreadGoalInComposer = useCallback(() => {
@@ -5444,6 +5455,8 @@ export default function ChatView({
                           onInteractionModeChange={handleInteractionModeChange}
                           onInsertGoal={insertGoalSlashCommandInComposer}
                           onInsertOrchestration={insertOrchestrationSlashCommandInComposer}
+                          sidekickModels={searchableModelOptions}
+                          onInsertFusion={insertFusionSlashCommandInComposer}
                           onClose={() => {
                             setIsComposerExtrasPanelOpen(false);
                             scheduleComposerFocus();

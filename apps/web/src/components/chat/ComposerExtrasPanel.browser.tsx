@@ -123,12 +123,19 @@ async function mountMenu(props?: {
   interactionMode?: ProviderInteractionMode;
   supportsFastMode?: boolean;
   threadId?: ThreadId;
+  sidekickModels?: ReadonlyArray<{
+    provider: "codex" | "devin";
+    providerLabel: string;
+    slug: string;
+    name: string;
+  }>;
 }) {
   const onAddAttachments = vi.fn();
   const onToggleFastMode = vi.fn();
   const onInteractionModeChange = vi.fn();
   const onInsertGoal = vi.fn();
   const onInsertOrchestration = vi.fn();
+  const onInsertFusion = vi.fn();
   const onClose = vi.fn();
   const host = document.createElement("div");
   document.body.append(host);
@@ -144,6 +151,8 @@ async function mountMenu(props?: {
       onInteractionModeChange={onInteractionModeChange}
       onInsertGoal={onInsertGoal}
       onInsertOrchestration={onInsertOrchestration}
+      sidekickModels={props?.sidekickModels ?? []}
+      onInsertFusion={onInsertFusion}
       onClose={onClose}
     />,
     { container: host },
@@ -162,6 +171,7 @@ async function mountMenu(props?: {
     onInteractionModeChange,
     onInsertGoal,
     onInsertOrchestration,
+    onInsertFusion,
     onClose,
   };
 }
@@ -243,6 +253,34 @@ describe("ComposerExtrasPanel", () => {
     await page.getByText("Orchestration", { exact: true }).click();
 
     expect(menu.onInsertOrchestration).toHaveBeenCalledTimes(1);
+    expect(menu.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("picks a fusion sidekick and skips Devin fusion pairings", async () => {
+    await using menu = await mountMenu({
+      sidekickModels: [
+        { provider: "codex", providerLabel: "Codex", slug: "gpt-5.4-mini", name: "GPT-5.4 mini" },
+        {
+          provider: "devin",
+          providerLabel: "Devin",
+          slug: "fusion-opus-sidekick-swe",
+          name: "Fusion pairing",
+        },
+        { provider: "devin", providerLabel: "Devin", slug: "swe-2-medium", name: "SWE-2 Medium" },
+      ],
+    });
+
+    await page.getByText("Fusion", { exact: true }).click();
+    await expect.element(page.getByText("Sidekick provider")).toBeVisible();
+    expect(document.body.textContent ?? "").not.toContain("Fusion pairing");
+
+    await page.getByText("Codex", { exact: true }).click();
+    await page.getByText("GPT-5.4 mini", { exact: true }).click();
+
+    expect(menu.onInsertFusion).toHaveBeenCalledWith({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+    });
     expect(menu.onClose).toHaveBeenCalledTimes(1);
   });
 

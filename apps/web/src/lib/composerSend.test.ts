@@ -41,6 +41,16 @@ describe("Computer command with provider prompt formatting", () => {
       }),
     ).toBe("/orchestration Ultrathink:\nrefactor the sidebar");
   });
+  it("keeps the fusion sidekick token when Claude uses a prompt-injected effort", () => {
+    expect(
+      formatOutgoingComposerPrompt({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        effort: "ultrathink",
+        text: "/fusion sidekick:codex/gpt-5.4-mini fix the failing test",
+      }),
+    ).toBe("/fusion sidekick:codex/gpt-5.4-mini Ultrathink:\nfix the failing test");
+  });
   it("keeps ordinary prompts and providers on their existing formatting path", () => {
     expect(
       formatOutgoingComposerPrompt({

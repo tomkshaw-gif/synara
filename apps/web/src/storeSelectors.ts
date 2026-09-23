@@ -4,6 +4,7 @@
 
 import type { ProjectId, ThreadEnvironmentMode, ThreadId } from "@synara/contracts";
 import { isAutomationRunThread } from "@synara/shared/automationMode";
+import { isFusionSidekickRole } from "@synara/shared/fusionInvocation";
 
 import type { AppState } from "./storeState";
 import { ACCOUNT_RATE_LIMIT_ACTIVITY_KINDS } from "./lib/rateLimits";
@@ -385,7 +386,7 @@ export function createComposerThreadMentionSourcesSelector(): (
 
     const nextSources = (threadIds ?? []).flatMap((threadId) => {
       const thread = summaryById[threadId];
-      return thread && !thread.sidechatSourceThreadId
+      return thread && !thread.sidechatSourceThreadId && !isFusionSidekickRole(thread.subagentRole)
         ? [
             {
               id: thread.id,
@@ -440,6 +441,15 @@ export function isSidebarThreadVisible(
   options?: SidebarThreadVisibilityOptions,
 ): boolean {
   if (thread.sidechatSourceThreadId) return false;
+  // A fusion sidekick is the lead's hidden worker. Show it only while it is
+  // blocked on an approval or a question, so that wait has a row to open.
+  if (
+    isFusionSidekickRole(thread.subagentRole) &&
+    thread.hasPendingApprovals !== true &&
+    thread.hasPendingUserInput !== true
+  ) {
+    return false;
+  }
   if (!options?.hideAutomationRunThreads) return true;
   if (thread.isPinned) return true;
   return !isAutomationRunThread(thread);

@@ -3,6 +3,7 @@
 // Layer: Notification logic
 // Exports: lifecycle detection helpers and notification copy helpers
 
+import { isFusionSidekickRole } from "@synara/shared/fusionInvocation";
 import {
   defaultTerminalTitleForCliKind,
   type TerminalCliKind,
@@ -578,6 +579,13 @@ export function collectCompletedThreadCandidates(
 // completedAt is deliberately excluded: the same turn's completedAt is rewritten
 // by later events (assistant message, session settle, checkpoint diff) with
 // slightly different timestamps, and a turn only ever completes once.
+/** A finished fusion sidekick reports through the lead. Don't toast a hidden thread. */
+export function shouldNotifyThreadCompletion(
+  thread: { subagentRole?: string | null } | undefined,
+): boolean {
+  return !isFusionSidekickRole(thread?.subagentRole);
+}
+
 export function completedThreadNotificationKey(candidate: CompletedThreadCandidate): string {
   return `${candidate.threadId}:${candidate.turnId}`;
 }

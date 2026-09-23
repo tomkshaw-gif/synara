@@ -21,6 +21,11 @@ import {
 import { applyClaudePromptEffortPrefix, getModelCapabilities } from "@synara/shared/model";
 import { parseComputerInvocation } from "@synara/shared/computerInvocation";
 import {
+  buildFusionSlashCommand,
+  FUSION_SLASH_COMMAND,
+  parseFusionInvocation,
+} from "@synara/shared/fusionInvocation";
+import {
   ORCHESTRATION_SLASH_COMMAND,
   parseOrchestrationInvocation,
 } from "@synara/shared/orchestrationInvocation";
@@ -223,6 +228,16 @@ export function formatOutgoingComposerPrompt(params: {
         params.effort as ClaudeCodeEffort | null,
       );
       return `/${ORCHESTRATION_SLASH_COMMAND} ${prompt}`;
+    }
+    const fusionInvocation = parseFusionInvocation(params.text);
+    if (fusionInvocation) {
+      const prompt = applyClaudePromptEffortPrefix(
+        fusionInvocation.prompt,
+        params.effort as ClaudeCodeEffort | null,
+      );
+      return fusionInvocation.sidekick
+        ? buildFusionSlashCommand(fusionInvocation.sidekick, prompt)
+        : `/${FUSION_SLASH_COMMAND} ${prompt}`;
     }
     return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
   }

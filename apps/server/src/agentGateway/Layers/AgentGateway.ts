@@ -352,9 +352,9 @@ export const makeAgentGateway = Effect.gen(function* () {
                 },
                 spawnAs: {
                   type: "string",
-                  enum: ["standalone", "subagent"],
+                  enum: ["standalone", "subagent", "sidekick"],
                   description:
-                    '"subagent" nests the thread under this thread as a supervised worker: it inherits this project, gets a worker contract prompt, and reports through synara_wait_for_threads / synara_send_message. Default "standalone".',
+                    '"subagent" nests a visible supervised worker. "sidekick" binds one hidden execution thread for /fusion; omit role and nickname. Default "standalone".',
                 },
                 role: {
                   type: "string",
@@ -432,9 +432,9 @@ export const makeAgentGateway = Effect.gen(function* () {
           },
           spawnAs: {
             type: "string",
-            enum: ["standalone", "subagent"],
+            enum: ["standalone", "subagent", "sidekick"],
             description:
-              '"subagent" nests the thread under this thread as a supervised worker: it inherits this project, gets a worker contract prompt, and reports through synara_wait_for_threads / synara_send_message. Default "standalone".',
+              '"subagent" nests a visible supervised worker. "sidekick" binds one hidden execution thread for /fusion; omit role and nickname. Default "standalone".',
           },
           role: {
             type: "string",

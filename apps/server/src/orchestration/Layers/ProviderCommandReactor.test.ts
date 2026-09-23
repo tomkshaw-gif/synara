@@ -8652,6 +8652,42 @@ describe("ProviderCommandReactor", () => {
     ).toBe("/orchestration split the refactor across workers");
   });
 
+  it("expands a /fusion turn into the lead playbook and keeps the sidekick target", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const text = "/fusion sidekick:codex/gpt-5.4-mini fix the failing test";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("fusion-invocation"),
+        threadId,
+        message: {
+          messageId: asMessageId("fusion-message"),
+          role: "user",
+          text,
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    const providerInput = harness.sendTurn.mock.calls[0]?.[0].input ?? "";
+    expect(providerInput).toContain("Fusion mode");
+    expect(providerInput).toContain('spawnAs:"sidekick"');
+    expect(providerInput).toContain('{"provider":"codex","model":"gpt-5.4-mini"}');
+    expect(providerInput).toContain("fix the failing test");
+    expect(providerInput).not.toContain("/fusion");
+    expect(
+      (await readHarnessThread(harness))?.messages.find(
+        (message) => message.id === asMessageId("fusion-message"),
+      )?.text,
+    ).toBe(text);
+  });
+
   it("leaves non-command turns untouched by the orchestration expansion", async () => {
     const harness = await createHarness();
     const threadId = ThreadId.makeUnsafe("thread-1");
@@ -8677,6 +8713,7 @@ describe("ProviderCommandReactor", () => {
     const providerInput = harness.sendTurn.mock.calls[0]?.[0].input ?? "";
     expect(providerInput).toContain("just do the refactor yourself");
     expect(providerInput).not.toContain("Orchestration mode");
+    expect(providerInput).not.toContain("Fusion mode");
   });
 
   it("a frozen switch-off turn records no durable intent for the next ordinary turn", async () => {
@@ -9384,6 +9421,62 @@ describe("ProviderCommandReactor", () => {
     // The subagent thread must never boot a provider session of its own.
     expect(harness.startSession).not.toHaveBeenCalled();
     expect(harness.sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("starts a supervised worker while the coordinator turn is still running", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const workerId = ThreadId.makeUnsafe("agent-worker-1");
+    harness.setRuntimeSessionTurnState({
+      threadId: "thread-1",
+      status: "running",
+      activeTurnId: asTurnId("turn-parent"),
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-worker-thread-create"),
+        threadId: workerId,
+        projectId: asProjectId("project-1"),
+        title: "Forge",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        parentThreadId: ThreadId.makeUnsafe("thread-1"),
+        creationSource: "synara_mcp",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-worker-turn-start"),
+        threadId: workerId,
+        message: {
+          messageId: asMessageId("worker-message-1"),
+          role: "user",
+          text: "build the viewer",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.some((call) => call[0] === workerId));
+    await waitFor(() =>
+      harness.sendTurn.mock.calls.some(
+        (call) =>
+          call[0]?.threadId === workerId &&
+          typeof call[0].input === "string" &&
+          call[0].input.includes("build the viewer"),
+      ),
+    );
+    expect(harness.steerSubagent).not.toHaveBeenCalled();
   });
 
   it("injects the subagent thread goal into its parent-session steer", async () => {

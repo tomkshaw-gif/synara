@@ -17,6 +17,7 @@ import {
   type SynaraCreateThreadsResult,
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
+import { FUSION_SIDEKICK_NICKNAME, FUSION_SIDEKICK_ROLE } from "@synara/shared/fusionInvocation";
 import { WORKTREE_BRANCH_PREFIX } from "@synara/shared/git";
 import { parseGitHubRepositoryNameWithOwnerFromPullRequestUrl } from "@synara/shared/githubRepository";
 import { runtimeModeEscalatesPrivilege } from "@synara/shared/runtimeMode";
@@ -44,6 +45,7 @@ import {
   stableGatewayDigest,
 } from "./creationUtils.ts";
 import { mcpToolResultError, mcpToolResultJson, type McpToolCallResult } from "./protocol.ts";
+import { buildFusionSidekickPrompt } from "./fusionSidekickPrompt.ts";
 import { buildSubagentWorkerPrompt } from "./subagentWorkerPrompt.ts";
 import {
   AgentGatewayTargetError,
@@ -544,13 +546,27 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             );
           }
           const spawnAsSubagent = spec.spawnAs === "subagent";
-          if (!spawnAsSubagent && (spec.role !== undefined || spec.nickname !== undefined)) {
+          const spawnAsSidekick = spec.spawnAs === "sidekick";
+          const spawnAsBound = spawnAsSubagent || spawnAsSidekick;
+          if (spawnAsSidekick && (spec.role !== undefined || spec.nickname !== undefined)) {
+            return yield* Effect.fail(
+              new ToolInputError('Omit "role" and "nickname" for spawnAs:"sidekick".'),
+            );
+          }
+          if (spawnAsSubagent && spec.role?.trim() === FUSION_SIDEKICK_ROLE) {
+            return yield* Effect.fail(
+              new ToolInputError(
+                `"${FUSION_SIDEKICK_ROLE}" is reserved. Use spawnAs:"sidekick" for a fusion sidekick.`,
+              ),
+            );
+          }
+          if (!spawnAsBound && (spec.role !== undefined || spec.nickname !== undefined)) {
             return yield* Effect.fail(
               new ToolInputError('"role" and "nickname" require spawnAs:"subagent".'),
             );
           }
           let subagentParentThreadId: ThreadId | null = null;
-          if (spawnAsSubagent) {
+          if (spawnAsBound) {
             if (context.kind !== "provider-session") {
               return yield* Effect.fail(
                 new GatewayToolError(
@@ -699,17 +715,30 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             // Subagent binding: the child hangs under the calling thread and its
             // first turn carries the worker contract instead of the bare task.
             parentThreadId: subagentParentThreadId,
-            subagentNickname: spawnAsSubagent ? spec.nickname?.trim() || null : null,
-            subagentRole: spawnAsSubagent ? spec.role?.trim() || null : null,
-            promptText: spawnAsSubagent
-              ? buildSubagentWorkerPrompt({
+            subagentNickname: spawnAsSidekick
+              ? FUSION_SIDEKICK_NICKNAME
+              : spawnAsSubagent
+                ? spec.nickname?.trim() || null
+                : null,
+            subagentRole: spawnAsSidekick
+              ? FUSION_SIDEKICK_ROLE
+              : spawnAsSubagent
+                ? spec.role?.trim() || null
+                : null,
+            promptText: spawnAsSidekick
+              ? buildFusionSidekickPrompt({
                   task: spec.prompt,
-                  role: spec.role?.trim() || undefined,
-                  nickname: spec.nickname?.trim() || undefined,
-                  parentThreadId: caller!.id,
                   parentTitle: caller!.title,
                 })
-              : spec.prompt,
+              : spawnAsSubagent
+                ? buildSubagentWorkerPrompt({
+                    task: spec.prompt,
+                    role: spec.role?.trim() || undefined,
+                    nickname: spec.nickname?.trim() || undefined,
+                    parentThreadId: caller!.id,
+                    parentTitle: caller!.title,
+                  })
+                : spec.prompt,
             projectScripts: project.scripts,
             worktreeRef,
             copyChangesFrom,

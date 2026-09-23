@@ -8,6 +8,7 @@ import {
   TurnId,
   type OrchestrationPendingInteraction,
 } from "@synara/contracts";
+import { FUSION_SIDEKICK_ROLE } from "@synara/shared/fusionInvocation";
 import {
   buildInputNeededCopy,
   buildTaskCompletionCopy,
@@ -16,6 +17,7 @@ import {
   completedThreadNotificationKey,
   isNotificationRuntimeFreshTimestamp,
   shouldAttemptSystemTaskNotification,
+  shouldNotifyThreadCompletion,
   shouldShowThreadNotificationToast,
 } from "./taskCompletion.logic";
 import type { Thread } from "../types";
@@ -132,6 +134,14 @@ describe("shouldAttemptSystemTaskNotification", () => {
     expect(shouldAttemptSystemTaskNotification({ enabled: false, isWindowForeground: false })).toBe(
       false,
     );
+  });
+});
+
+describe("shouldNotifyThreadCompletion", () => {
+  it("skips a finished fusion sidekick and keeps every other thread", () => {
+    expect(shouldNotifyThreadCompletion({ subagentRole: FUSION_SIDEKICK_ROLE })).toBe(false);
+    expect(shouldNotifyThreadCompletion({ subagentRole: "implementer" })).toBe(true);
+    expect(shouldNotifyThreadCompletion(undefined)).toBe(true);
   });
 });
 

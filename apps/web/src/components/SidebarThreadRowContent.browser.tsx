@@ -68,6 +68,7 @@ describe("SidebarThreadRowContent", () => {
           parentThreadId: ThreadId.makeUnsafe("thread-parent-row"),
           subagentNickname: "Scout",
           subagentRole: "reviewer",
+          modelSelection: { provider: "grok", model: "grok-4.7" },
         })}
         terminalEntryPoint={false}
         terminalStatus={null}
@@ -80,5 +81,7 @@ describe("SidebarThreadRowContent", () => {
 
     await expect.element(screen.getByText("Scout")).toBeVisible();
     await expect.element(screen.getByText("(reviewer)")).toBeVisible();
+    expect(document.querySelector('svg[viewBox="0 0 1024 1024"]')).not.toBeNull();
+    expect(document.querySelector(".size-\\[5px\\]")).toBeNull();
   });
 });

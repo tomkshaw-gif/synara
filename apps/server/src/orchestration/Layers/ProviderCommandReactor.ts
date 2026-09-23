@@ -1,6 +1,7 @@
 import { appendAppSnapPromptContext } from "../../provider/appSnapPromptContext.ts";
 import { computerActivationMetadata } from "../../computer/computerActivation.ts";
 import { parseComputerInvocation } from "@synara/shared/computerInvocation";
+import { buildFusionLeadPrompt, parseFusionInvocation } from "@synara/shared/fusionInvocation";
 import {
   buildOrchestrationCoordinatorPrompt,
   parseOrchestrationInvocation,
@@ -1444,9 +1445,11 @@ const make = Effect.gen(function* () {
   // directions (queueing after the turn already settled, or dispatching while
   // a turn is still live). Adapters clear `activeTurnId` synchronously with
   // emitting `turn.completed`/`turn.aborted`, so this check is authoritative.
-  // Child subagent threads share their parent's provider session, so the
+  // Synthetic subagent threads share their parent's provider session, so the
   // lookup must resolve to the session-owning thread — a raw child-id lookup
   // would always miss and drain queued child messages into a live turn.
+  // Supervised workers keep their own id here and start even while the
+  // coordinator turn is still running.
   const resolveLiveProviderTurnId = Effect.fnUntraced(function* (threadId: ThreadId) {
     const providerThread = yield* resolveProviderSessionThread(threadId);
     const sessionThreadId = providerThread?.id ?? threadId;
@@ -2241,14 +2244,20 @@ const make = Effect.gen(function* () {
       input.dispatchOrigin === undefined || input.dispatchOrigin === "user"
         ? parseOrchestrationInvocation(input.messageText)
         : null;
+    const fusionInvocation =
+      input.dispatchOrigin === undefined || input.dispatchOrigin === "user"
+        ? parseFusionInvocation(input.messageText)
+        : null;
     // Synara owns these commands. Keep them in durable user text for provenance,
     // but do not ask the provider to interpret a native slash command; the
-    // orchestration token expands into the coordinator playbook instead.
+    // token expands into the coordinator or fusion lead playbook instead.
     const authoredMessageText = computerInvocation
       ? computerInvocation.prompt || "Use Synara Computer for this task."
       : orchestrationInvocation
         ? buildOrchestrationCoordinatorPrompt(orchestrationInvocation.prompt)
-        : input.messageText;
+        : fusionInvocation
+          ? buildFusionLeadPrompt(fusionInvocation)
+          : input.messageText;
     const threadMentionProjection = yield* resolveThreadMentionPromptProjection({
       mentions: input.mentions,
       snapshotQuery: projectionSnapshotQuery,

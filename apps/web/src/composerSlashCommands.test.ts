@@ -3,6 +3,7 @@ import { THREAD_GOAL_MAX_CHARS } from "@synara/contracts";
 
 import {
   buildGoalSlashCommandPrompt,
+  buildFusionSlashCommandPrompt,
   buildOrchestrationSlashCommandPrompt,
   buildReviewPrompt,
   buildSubagentsPrompt,
@@ -389,6 +390,24 @@ describe("composerSlashCommands", () => {
     ).toEqual({ command: "orchestration", args: "do the thing" });
   });
 
+  it("keeps an existing task when the fusion picker chooses a sidekick", () => {
+    expect(
+      buildFusionSlashCommandPrompt(
+        { provider: "codex", model: "gpt-5.4-mini" },
+        "fix the failing test",
+      ),
+    ).toBe("/fusion sidekick:codex/gpt-5.4-mini fix the failing test");
+    expect(
+      buildFusionSlashCommandPrompt(
+        { provider: "grok", model: "grok-4.6" },
+        "/fusion sidekick:codex/gpt-5.4-mini fix the failing test",
+      ),
+    ).toBe("/fusion sidekick:grok/grok-4.6 fix the failing test");
+    expect(
+      buildFusionSlashCommandPrompt({ provider: "codex", model: "gpt-5.4-mini" }, "/goal ship it"),
+    ).toBe("/fusion sidekick:codex/gpt-5.4-mini ");
+  });
+
   it.each(["codex", "claudeAgent", "opencode"] as const)(
     "offers app-owned /orchestration for %s despite a native name collision",
     (provider) => {
@@ -403,6 +422,8 @@ describe("composerSlashCommands", () => {
         providerNativeCommandNames: ["orchestration"],
       });
       expect(commands.filter((command) => command === "orchestration")).toHaveLength(1);
+      expect(shouldHideProviderNativeCommandFromComposerMenu(provider, "fusion")).toBe(true);
+      expect(commands.filter((command) => command === "fusion")).toHaveLength(1);
     },
   );
 
@@ -533,6 +554,7 @@ describe("composerSlashCommands", () => {
       "debug",
       "computer-use",
       "orchestration",
+      "fusion",
       "default",
       "feedback",
       "automation",
@@ -662,6 +684,7 @@ describe("composerSlashCommands", () => {
       "status",
       "subagents",
       "orchestration",
+      "fusion",
       "computer-use",
       "export",
       "goal",
