@@ -598,6 +598,14 @@ export function deriveTerminalAssistantMessageIds(
   return terminalAssistantMessageIds;
 }
 
+// Coordinator notices, provider handoffs, and background task completions keep
+// their own row so transcript boundaries never merge into or fold with turn work.
+export function isStandaloneWorkEntry(
+  entry: Pick<WorkLogEntry, "synaraWorkerNotice" | "providerHandoff" | "backgroundTaskCompletion">,
+): boolean {
+  return Boolean(entry.synaraWorkerNotice || entry.providerHandoff || entry.backgroundTaskCompletion);
+}
+
 // Derives transcript rows from timeline entries while keeping live narration and
 // tool rows in visual chronology. Work already waiting when assistant text
 // arrives renders above that text; trailing work renders below it.
@@ -697,7 +705,7 @@ export function deriveMessagesTimelineRows(input: {
       // conversation-only surfaces, so they must never join a mergeable group.
       // Background task completions do too: they separate two responses.
       for (const runEntry of run) {
-        if (runEntry.entry.synaraWorkerNotice || runEntry.entry.backgroundTaskCompletion) {
+        if (isStandaloneWorkEntry(runEntry.entry)) {
           flushPendingWorkGroup();
           nextRows.push({
             kind: "work",
@@ -940,7 +948,7 @@ function collapseSettledTurns(
         // Coordinator monitor rows are server-posted system pills, not turn
         // work — folding them into a collapsed turn would hide them on
         // conversation-only surfaces.
-        if (prev.groupedEntries.some((entry) => entry.synaraWorkerNotice)) continue;
+        if (prev.groupedEntries.some(isStandaloneWorkEntry)) continue;
         foldIndices.push(scan);
         continue;
       }
