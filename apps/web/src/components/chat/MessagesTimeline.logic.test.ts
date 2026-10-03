@@ -916,6 +916,44 @@ describe("deriveMessagesTimelineRows", () => {
     expect(messageRow(rows, "report-1")?.durationStart).toBe("2026-01-01T00:01:00Z");
   });
 
+  it.each([true, false])(
+    "keeps handoffs and subagent completions visible with finished-turn folding %s",
+    (collapseFinishedTurns) => {
+      const handoff = workEntry("handoff", "2026-01-01T00:01:00.500Z", "Provider switched", "info");
+      if (handoff.kind !== "work") throw new Error("Expected a work entry");
+      handoff.entry.providerHandoff = {
+        status: "completed",
+        sourceProvider: "codex",
+        sourceModel: "gpt-6",
+        targetProvider: "claudeAgent",
+        targetModel: "claude-opus-4-8",
+        sourceModelSelection: { provider: "codex", model: "gpt-6" },
+        targetModelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
+        contextText: "Continue the subagent review.",
+        failureDetail: null,
+      };
+      const entries = wokenResponseEntries({ lastStreaming: false });
+      entries.splice(5, 0, handoff);
+      const rows = deriveMessagesTimelineRows({
+        ...baseInput,
+        collapseFinishedTurns,
+        timelineEntries: entries,
+      });
+      const boundaries = rows.flatMap((row) =>
+        row.kind === "work"
+          ? row.groupedEntries.filter(
+              (entry) => entry.providerHandoff || entry.backgroundTaskCompletion,
+            )
+          : [],
+      );
+      expect(boundaries.map((entry) => entry.id)).toEqual(["done-1", "handoff", "done-2"]);
+      expect(messageRow(rows, "report-1")?.durationStart).toBe("2026-01-01T00:01:00Z");
+      expect(collapsedSignature(messageRow(rows, "report-1")!)).toEqual(
+        collapseFinishedTurns ? ["work:check-1"] : [],
+      );
+    },
+  );
+
   it("keeps earlier responses folded while a background task wakes a new one", () => {
     const rows = deriveMessagesTimelineRows({
       ...baseInput,

@@ -603,7 +603,9 @@ export function deriveTerminalAssistantMessageIds(
 export function isStandaloneWorkEntry(
   entry: Pick<WorkLogEntry, "synaraWorkerNotice" | "providerHandoff" | "backgroundTaskCompletion">,
 ): boolean {
-  return Boolean(entry.synaraWorkerNotice || entry.providerHandoff || entry.backgroundTaskCompletion);
+  return Boolean(
+    entry.synaraWorkerNotice || entry.providerHandoff || entry.backgroundTaskCompletion,
+  );
 }
 
 // Derives transcript rows from timeline entries while keeping live narration and
