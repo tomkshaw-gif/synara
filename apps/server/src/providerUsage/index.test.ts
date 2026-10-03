@@ -3,6 +3,8 @@
 // of concurrent requests, forceRefresh bypass, and the shorter expiry for degraded snapshots —
 // so UI surfaces polling in parallel can't stampede the provider fetchers.
 
+import NodePath from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -265,10 +267,12 @@ function usageTestLayer() {
 }
 
 describe("listProviderUsage account routing", () => {
+  const personalHome = NodePath.resolve("/accounts/personal");
+  const workHome = NodePath.resolve("/accounts/work");
   it.each(["same-source", "environment-only"] as const)(
     "reads the private Codex account overlay for a %s account",
     async (kind) => {
-      vi.stubEnv("CODEX_HOME", "/accounts/personal");
+      vi.stubEnv("CODEX_HOME", personalHome);
       fetchMock.mockImplementation(async (ctx) => okSnapshot(ctx.nowMs, ctx.env.CODEX_HOME));
       const result = await Effect.runPromise(
         Effect.gen(function* () {
@@ -278,8 +282,8 @@ describe("listProviderUsage account routing", () => {
               codex_work: {
                 driver: "codex",
                 ...(kind === "same-source"
-                  ? { config: { homePath: "/accounts/personal" } }
-                  : { environment: [{ name: "CODEX_HOME", value: "/accounts/personal" }] }),
+                  ? { config: { homePath: personalHome } }
+                  : { environment: [{ name: "CODEX_HOME", value: personalHome }] }),
               },
             },
           });
@@ -287,8 +291,10 @@ describe("listProviderUsage account routing", () => {
         }).pipe(Effect.provide(usageTestLayer()), Effect.scoped),
       );
       const work = result.find((snapshot) => snapshot.instanceId === "codex_work");
-      expect(work?.source).toMatch(/\/codex-home-overlay\/accounts\/codex_work-[a-f0-9]{12}$/u);
-      expect(work?.source).not.toBe("/accounts/personal");
+      expect(work?.source?.replaceAll("\\", "/")).toMatch(
+        /\/codex-home-overlay\/accounts\/codex_work-[a-f0-9]{12}$/u,
+      );
+      expect(work?.source).not.toBe(personalHome);
     },
   );
 
@@ -302,7 +308,7 @@ describe("listProviderUsage account routing", () => {
             codex_work: {
               driver: "codex",
               environment: [{ name: "TEST_USAGE_CONTEXT", value: "before" }],
-              config: { homePath: "/accounts/work" },
+              config: { homePath: workHome },
             },
           },
         });
@@ -312,7 +318,7 @@ describe("listProviderUsage account routing", () => {
             codex_work: {
               driver: "codex",
               environment: [{ name: "TEST_USAGE_CONTEXT", value: "after" }],
-              config: { homePath: "/accounts/work" },
+              config: { homePath: workHome },
             },
           },
         });
@@ -325,7 +331,7 @@ describe("listProviderUsage account routing", () => {
   it("returns both configured accounts with their own homes and cached quotas", async () => {
     fetchMock.mockImplementation(async (ctx) => ({
       ...okSnapshot(ctx.nowMs, ctx.env.CODEX_HOME),
-      limits: [{ window: "5h", usedPercent: ctx.env.CODEX_HOME === "/accounts/work" ? 72 : 21 }],
+      limits: [{ window: "5h", usedPercent: ctx.env.CODEX_HOME === workHome ? 72 : 21 }],
       resetCredits: { availableCount: 1, canUse: true },
     }));
     localUsageLinesMock.mockResolvedValue([{ label: "Tokens", value: "default total" }]);
@@ -335,8 +341,8 @@ describe("listProviderUsage account routing", () => {
         const settings = yield* ServerSettingsService;
         yield* settings.updateSettings({
           providerInstances: {
-            codex: { driver: "codex", config: { homePath: "/accounts/personal" } },
-            codex_work: { driver: "codex", config: { homePath: "/accounts/work" } },
+            codex: { driver: "codex", config: { homePath: personalHome } },
+            codex_work: { driver: "codex", config: { homePath: workHome } },
           },
         });
         const first = yield* listProviderUsage({});
@@ -346,10 +352,10 @@ describe("listProviderUsage account routing", () => {
     );
 
     expect(result.first).toMatchObject([
-      { instanceId: "codex", source: "/accounts/personal", limits: [{ usedPercent: 21 }] },
+      { instanceId: "codex", source: personalHome, limits: [{ usedPercent: 21 }] },
       {
         instanceId: "codex_work",
-        source: "/accounts/work",
+        source: workHome,
         limits: [{ usedPercent: 72 }],
         resetCredits: { canUse: false },
         usageLines: [],
@@ -360,7 +366,7 @@ describe("listProviderUsage account routing", () => {
     expect(localUsageLinesMock).toHaveBeenCalledWith({
       provider: "codex",
       homeDir: expect.any(String),
-      homePath: "/accounts/personal",
+      homePath: personalHome,
     });
   });
 
@@ -372,13 +378,13 @@ describe("listProviderUsage account routing", () => {
         yield* settings.updateSettings({
           providers: { codex: { enabled: false } },
           providerInstances: {
-            codex_work: { driver: "codex", config: { homePath: "/accounts/work" } },
+            codex_work: { driver: "codex", config: { homePath: workHome } },
           },
         });
         return yield* listProviderUsage({ provider: "codex" });
       }).pipe(Effect.provide(usageTestLayer()), Effect.scoped),
     );
-    expect(result).toMatchObject([{ instanceId: "codex_work", source: "/accounts/work" }]);
+    expect(result).toMatchObject([{ instanceId: "codex_work", source: workHome }]);
     expect(result).toHaveLength(1);
   });
 
@@ -393,7 +399,7 @@ describe("listProviderUsage account routing", () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const settings = yield* ServerSettingsService;
-          const account = { driver: "codex", config: { homePath: "/accounts/work" } };
+          const account = { driver: "codex", config: { homePath: workHome } };
           yield* settings.updateSettings({ providerInstances: { codex_work: account } });
           yield* listProviderUsage({});
           yield* settings.updateSettings({
@@ -440,7 +446,7 @@ describe("listProviderUsage account routing", () => {
     expect(
       result.snapshots.find((snapshot) => snapshot.instanceId === "codex_shadow"),
     ).toMatchObject({
-      source: `${result.homeDir}/accounts/shadow`,
+      source: NodePath.join(result.homeDir, "accounts", "shadow"),
       usageLines: [{ label: "Marker", value: "shadow" }],
     });
   });
