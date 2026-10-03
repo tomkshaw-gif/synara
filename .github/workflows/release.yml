@@ -1,9 +1,9 @@
 name: Release Desktop
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  # Tag pushes publish the unsigned Windows installer from release-win.yml.
+  # This signed multi-platform workflow stays manual: the fork has no Apple,
+  # Azure, or npm secrets.
   workflow_dispatch:
     inputs:
       version:
