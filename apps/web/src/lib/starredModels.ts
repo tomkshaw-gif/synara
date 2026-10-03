@@ -1,5 +1,6 @@
 // FILE: starredModels.ts
-// Purpose: Storage schema + pure helpers for starred model presets (provider + model + traits).
+// Purpose: Storage schema + pure helpers for starred model presets
+//          (provider account + model + traits).
 // Layer: Web local-storage helpers used by the composer model picker and model cycle shortcuts.
 // Depends on: legacy per-provider favorite slugs (modelFavorites) for the one-time seed.
 
@@ -14,50 +15,60 @@ export const STARRED_MODELS_STORAGE_KEY = "synara:starred-models:v1";
 // A starred preset pins the traits the user composed once so one click restores them.
 // `null` traits mean "leave whatever the provider currently uses" (legacy favorites,
 // models without that control).
+// `instanceId` names a non-default provider account; absent means the default
+// account, so presets saved before accounts existed keep their meaning.
 export const StarredModelSchema = Schema.Struct({
   provider: Schema.String,
+  instanceId: Schema.optional(Schema.String),
   model: Schema.String,
   effort: Schema.NullOr(Schema.String),
   fastMode: Schema.NullOr(Schema.Boolean),
   thinking: Schema.NullOr(Schema.Boolean),
-  // Concrete provider variant uid (e.g. a Devin Fusion pairing). Absent on
-  // presets written before variant pinning existed.
-  modelVariant: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export const StarredModelsSchema = Schema.Array(StarredModelSchema);
 
 export interface StarredModel {
   readonly provider: ProviderKind;
+  /** Non-default provider account; omitted for the default account. */
+  readonly instanceId?: string;
   readonly model: string;
   readonly effort: string | null;
   readonly fastMode: boolean | null;
   readonly thinking: boolean | null;
-  readonly modelVariant: string | null;
 }
 
 export type StoredStarredModel = typeof StarredModelSchema.Type;
 
+/** The account a preset runs in; the default account shares the provider's id. */
+export function starredModelInstanceId(
+  entry: Pick<StoredStarredModel, "provider" | "instanceId">,
+): string {
+  return entry.instanceId?.trim() || entry.provider;
+}
+
 export function starredModelKey(
   entry: Pick<
     StoredStarredModel,
-    "provider" | "model" | "effort" | "fastMode" | "thinking" | "modelVariant"
+    "provider" | "instanceId" | "model" | "effort" | "fastMode" | "thinking"
   >,
 ): string {
   // JSON keeps the key unambiguous: model slugs may contain any separator character.
   return JSON.stringify([
     entry.provider,
+    starredModelInstanceId(entry),
     entry.model,
     entry.effort ?? "",
     entry.fastMode === null ? "" : String(entry.fastMode),
     entry.thinking === null ? "" : String(entry.thinking),
-    entry.modelVariant ?? "",
   ]);
 }
 
-// Provider + model only. A provider tab row shares its traits with every model of that
-// provider, so it counts as starred when any preset of the model exists.
-export function starredModelSlotKey(entry: Pick<StoredStarredModel, "provider" | "model">): string {
-  return JSON.stringify([entry.provider, entry.model]);
+// Account + model only. A provider tab row shares its traits with every model of that
+// account, so it counts as starred when any preset of the model exists.
+export function starredModelSlotKey(
+  entry: Pick<StoredStarredModel, "provider" | "instanceId" | "model">,
+): string {
+  return JSON.stringify([entry.provider, starredModelInstanceId(entry), entry.model]);
 }
 
 // Drops entries for providers this build no longer knows and de-duplicates by key,
@@ -72,7 +83,14 @@ export function normalizeStarredModels(
     const key = starredModelKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ ...entry, provider: entry.provider, modelVariant: entry.modelVariant ?? null });
+    const { instanceId: _instanceId, ...rest } = entry;
+    const instanceId = starredModelInstanceId(entry);
+    // Store the default account implicitly so older builds read the same preset.
+    result.push({
+      ...rest,
+      provider: entry.provider,
+      ...(instanceId !== entry.provider ? { instanceId } : {}),
+    });
   }
   return result;
 }
@@ -91,7 +109,7 @@ export function toggleStarredModel(
 // Removes every preset of a model, whatever traits each one pins.
 export function unstarModel(
   current: ReadonlyArray<StoredStarredModel>,
-  entry: Pick<StoredStarredModel, "provider" | "model">,
+  entry: Pick<StoredStarredModel, "provider" | "instanceId" | "model">,
 ): StoredStarredModel[] {
   const slot = starredModelSlotKey(entry);
   return normalizeStarredModels(current).filter(
@@ -111,7 +129,6 @@ export function seedStarredModelsFromLegacyFavorites(): StoredStarredModel[] {
       effort: null,
       fastMode: null,
       thinking: null,
-      modelVariant: null,
     })),
   );
 }
@@ -128,10 +145,12 @@ function readStoredStarredModels(): ReadonlyArray<StarredModel> {
   }
 }
 
-// Model slugs the cycle shortcut should prefer: starred presets plus legacy favorites.
-export function readStarredModelSlugs(provider: ProviderKind): string[] {
+// Model slugs the cycle shortcut should prefer: the account's starred presets plus
+// legacy (provider-wide) favorites.
+export function readStarredModelSlugs(provider: ProviderKind, instanceId?: string): string[] {
+  const account = instanceId?.trim() || provider;
   const starred = readStoredStarredModels()
-    .filter((entry) => entry.provider === provider)
+    .filter((entry) => entry.provider === provider && starredModelInstanceId(entry) === account)
     .map((entry) => entry.model);
   return Array.from(new Set([...starred, ...readFavoriteModelSlugs(provider)]));
 }

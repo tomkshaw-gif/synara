@@ -34,19 +34,6 @@ async function settleLayout(): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-async function waitForStableCommitCount(readCount: () => number): Promise<number> {
-  let last = readCount();
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    await settleLayout();
-    const next = readCount();
-    if (next === last) {
-      return last;
-    }
-    last = next;
-  }
-  return last;
-}
-
 function TranscriptPerfHarness(props: { onTranscriptRender: () => void }) {
   const [composerValue, setComposerValue] = useState("");
   const composerImagesRef = useRef<readonly []>([]);
@@ -164,16 +151,12 @@ describe("ChatTranscriptPane", () => {
         expect(transcriptCommitCount).toBeGreaterThan(0);
       });
 
-      // LegendList/tool-group layout can commit the pane after the first paint.
-      // Snapshot the baseline only once that burst has settled, otherwise CI
-      // attributes a late mount commit to the composer fill.
-      const baselineCommitCount = await waitForStableCommitCount(() => transcriptCommitCount);
+      const baselineCommitCount = transcriptCommitCount;
       await page.getByPlaceholder("Type composer text").fill("reply follow up");
 
       await vi.waitFor(() => {
         expect(screen.container.querySelector("#composer-input")).toHaveValue("reply follow up");
       });
-      await settleLayout();
 
       expect(transcriptCommitCount).toBe(baselineCommitCount);
     } finally {
@@ -272,6 +255,77 @@ describe("ChatTranscriptPane", () => {
       await screen.unmount();
       host.remove();
       await settleLayout();
+    }
+  });
+
+  it("lets the inline thread error Dismiss and Unblock controls receive clicks", async () => {
+    // The overlay wrapper is pointer-events-none so its margins do not swallow
+    // transcript clicks; the banner must re-enable events itself or the
+    // buttons can never be pressed.
+    const host = document.createElement("div");
+    host.style.cssText = "display:flex;width:600px;height:520px;";
+    document.body.append(host);
+
+    const onDismissThreadError = vi.fn();
+    const onUnblockThread = vi.fn();
+    const screen = await render(
+      <ChatTranscriptPane
+        activeThreadId="thread-error-overlay"
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        chatFontSizePx={15}
+        emptyStateProjectName={undefined}
+        hasMessages
+        isRevertingCheckpoint={false}
+        isWorking={false}
+        worktreeSetup={null}
+        followLiveOutput={false}
+        listRef={{ current: null }}
+        markdownCwd={undefined}
+        onExpandTimelineImage={NOOP}
+        onMessagesClickCapture={NOOP}
+        onMessagesMouseUp={NOOP}
+        onMessagesPointerCancel={NOOP}
+        onMessagesPointerDown={NOOP}
+        onMessagesPointerUp={NOOP}
+        onMessagesScroll={NOOP}
+        onMessagesTouchEnd={NOOP}
+        onMessagesTouchMove={NOOP}
+        onMessagesTouchStart={NOOP}
+        onMessagesWheel={NOOP}
+        onIsAtEndChange={NOOP}
+        onOpenTurnDiff={NOOP}
+        onOpenThread={NOOP}
+        onRevertUserMessage={NOOP}
+        onScrollToBottom={NOOP}
+        resolvedTheme="dark"
+        revertTurnCountByUserMessageId={EMPTY_REVERT_COUNTS}
+        scrollButtonVisible={false}
+        terminalWorkspaceTerminalTabActive={false}
+        threadError="Thread is blocked by an earlier provider failure: provider adapter request failed (codex): connect ETIMEDOUT"
+        unblockingThread={false}
+        onDismissThreadError={onDismissThreadError}
+        onUnblockThread={onUnblockThread}
+        timelineEntries={TIMELINE_ENTRIES}
+        timestampFormat="locale"
+        turnDiffSummaryByAssistantMessageId={EMPTY_TURN_DIFFS}
+        workspaceRoot={undefined}
+      />,
+      { container: host },
+    );
+    try {
+      const unblockButton = page.getByRole("button", { name: "Unblock thread" });
+      await expect.element(unblockButton).toBeInTheDocument();
+      await unblockButton.click();
+      expect(onUnblockThread).toHaveBeenCalledTimes(1);
+
+      const dismissButton = page.getByRole("button", { name: "Dismiss error" });
+      await expect.element(dismissButton).toBeInTheDocument();
+      await dismissButton.click();
+      expect(onDismissThreadError).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+      host.remove();
     }
   });
 

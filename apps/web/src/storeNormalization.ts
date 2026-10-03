@@ -20,8 +20,9 @@ import { deriveThreadSummaryMetadata } from "@synara/shared/threadSummary";
 
 import { isStalePendingRequestFailureDetail } from "./lib/pendingInteraction";
 import { toAttachmentPreviewUrl } from "./lib/wsHttpUrl";
-import { hasLiveTurnTailWork } from "./session-logic";
+import { derivePendingBackgroundWork, hasLiveTurnTailWork } from "./session-logic";
 import { getRememberedProjectUiState, projectCwdKey } from "./storePersistence";
+import { resolveInitialLastVisitedAt } from "./threadVisitedPersistence";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -158,7 +159,6 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     (left.settledAt ?? null) === (right.settledAt ?? null) &&
     left.updatedAt === right.updatedAt &&
     (left.isPinned ?? false) === (right.isPinned ?? false) &&
-    (left.userStatus ?? null) === (right.userStatus ?? null) &&
     left.envMode === right.envMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
@@ -175,6 +175,8 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     (left.subagentRole ?? null) === (right.subagentRole ?? null) &&
     (left.forkSourceThreadId ?? null) === (right.forkSourceThreadId ?? null) &&
     (left.sidechatSourceThreadId ?? null) === (right.sidechatSourceThreadId ?? null) &&
+    // The context never changes after creation; its URL identifies the item.
+    (left.sidechatContext?.url ?? null) === (right.sidechatContext?.url ?? null) &&
     (left.sidechatLastActivityAt ?? null) === (right.sidechatLastActivityAt ?? null) &&
     (left.sidechatExpiredAt ?? null) === (right.sidechatExpiredAt ?? null) &&
     deepEqualJson(left.lastKnownPr ?? null, right.lastKnownPr ?? null) &&
@@ -374,6 +376,8 @@ export function normalizeProject(
   const folderName = basenameOfPath(incoming.workspaceRoot) ?? incoming.title;
   const localName =
     previous?.localName ?? rememberedUiState.projectNameForCwd(workspaceRootKey) ?? null;
+  const appearance =
+    previous?.appearance ?? rememberedUiState.projectAppearanceForCwd(workspaceRootKey) ?? null;
   const defaultModelSelection =
     incoming.defaultModelSelection === null
       ? null
@@ -409,6 +413,7 @@ export function normalizeProject(
     previous.remoteName === incoming.title &&
     previous.folderName === folderName &&
     previous.localName === localName &&
+    (previous.appearance ?? null) === appearance &&
     previous.cwd === incoming.workspaceRoot &&
     previous.defaultModelSelection === defaultModelSelection &&
     previous.expanded === expanded &&
@@ -428,6 +433,7 @@ export function normalizeProject(
     remoteName: incoming.title,
     folderName,
     localName,
+    appearance,
     cwd: incoming.workspaceRoot,
     defaultModelSelection,
     expanded,
@@ -880,6 +886,9 @@ function readModelSessionFromThreadSession(
     threadId: previousThread?.id ?? incomingSession?.threadId ?? ThreadId.makeUnsafe("unknown"),
     status: previousSession.orchestrationStatus,
     providerName: previousSession.provider,
+    ...(previousSession.providerInstanceId !== undefined
+      ? { providerInstanceId: previousSession.providerInstanceId }
+      : {}),
     runtimeMode: previousThread?.runtimeMode ?? incomingSession?.runtimeMode ?? "full-access",
     activeTurnId: previousSession.activeTurnId ?? null,
     lastError: previousSession.lastError ?? null,
@@ -913,6 +922,11 @@ function mergeReadModelSessionWithLiveHotPath(
     return {
       ...nextSession,
       providerName: incomingSession.providerName,
+      ...(incomingSession.providerInstanceId !== undefined
+        ? { providerInstanceId: incomingSession.providerInstanceId }
+        : previousSession.providerInstanceId !== undefined
+          ? { providerInstanceId: previousSession.providerInstanceId }
+          : {}),
       runtimeMode: incomingSession.runtimeMode,
       activeTurnId: previousSession.activeTurnId ?? incomingSession.activeTurnId,
       lastError: previousSession.lastError ?? incomingSession.lastError,
@@ -1525,6 +1539,9 @@ export function normalizeThreadSession(
       : undefined;
   const nextSession = {
     provider: toLegacyProvider(incoming.providerName),
+    ...(incoming.providerInstanceId !== undefined
+      ? { providerInstanceId: incoming.providerInstanceId }
+      : {}),
     status: toLegacySessionStatus(incoming.status),
     orchestrationStatus: incoming.status,
     activeTurnId: incoming.activeTurnId ?? undefined,
@@ -1535,6 +1552,7 @@ export function normalizeThreadSession(
   if (
     previous &&
     previous.provider === nextSession.provider &&
+    previous.providerInstanceId === nextSession.providerInstanceId &&
     previous.status === nextSession.status &&
     previous.orchestrationStatus === nextSession.orchestrationStatus &&
     previous.activeTurnId === nextSession.activeTurnId &&
@@ -1590,6 +1608,8 @@ export function normalizeThreadFromReadModel(
   incoming: ReadModelThread,
   previous: Thread | undefined,
   snapshotSequence?: number,
+  /** `restoringSession`: see resolveInitialLastVisitedAt. */
+  options: { readonly restoringSession?: boolean } = {},
 ): Thread {
   const modelSelection = normalizeModelSelection(incoming.modelSelection, previous?.modelSelection);
   const session = normalizeThreadSession(incoming.session, previous?.session);
@@ -1649,7 +1669,7 @@ export function normalizeThreadFromReadModel(
         ? undefined
         : [...incomingPendingInteractions];
   const error = normalizeThreadErrorMessage(incoming.session?.lastError);
-  const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
+  const lastVisitedAt = previous?.lastVisitedAt ?? resolveInitialLastVisitedAt(incoming, options);
   const resolvedLatestHumanMessageAt = incoming.latestHumanMessageAt;
   const resolvedLatestUserMessageAt =
     Object.hasOwn(incoming, "latestUserMessageAt") && incoming.latestUserMessageAt !== undefined
@@ -1706,7 +1726,6 @@ export function normalizeThreadFromReadModel(
     (previous.settledAt ?? null) === (incoming.settledAt ?? null) &&
     previous.updatedAt === incoming.updatedAt &&
     (previous.isPinned ?? false) === (incoming.isPinned ?? false) &&
-    (previous.userStatus ?? null) === (incoming.userStatus ?? null) &&
     previous.latestTurn === latestTurn &&
     previous.pendingSourceProposedPlan === pendingSourceProposedPlan &&
     previous.lastVisitedAt === lastVisitedAt &&
@@ -1731,6 +1750,8 @@ export function normalizeThreadFromReadModel(
     previous.hasActionableProposedPlan === resolvedHasActionableProposedPlan &&
     (previous.forkSourceThreadId ?? null) === (incoming.forkSourceThreadId ?? null) &&
     (previous.sidechatSourceThreadId ?? null) === (incoming.sidechatSourceThreadId ?? null) &&
+    // The context never changes after creation; its URL identifies the item.
+    (previous.sidechatContext?.url ?? null) === (incoming.sidechatContext?.url ?? null) &&
     (previous.sidechatLastActivityAt ?? null) === (incoming.sidechatLastActivityAt ?? null) &&
     (previous.sidechatExpiredAt ?? null) === (incoming.sidechatExpiredAt ?? null) &&
     deepEqualJson(previous.lastKnownPr ?? null, lastKnownPr) &&
@@ -1767,7 +1788,6 @@ export function normalizeThreadFromReadModel(
     settledAt: incoming.settledAt ?? null,
     updatedAt: incoming.updatedAt,
     isPinned: incoming.isPinned ?? false,
-    userStatus: incoming.userStatus ?? null,
     latestTurn,
     ...(pendingSourceProposedPlan ? { pendingSourceProposedPlan } : {}),
     lastVisitedAt,
@@ -1787,6 +1807,7 @@ export function normalizeThreadFromReadModel(
     createBranchFlowCompleted: resolvedCreateBranchFlowCompleted,
     forkSourceThreadId: incoming.forkSourceThreadId ?? null,
     sidechatSourceThreadId: incoming.sidechatSourceThreadId ?? null,
+    sidechatContext: incoming.sidechatContext ?? null,
     sidechatLastActivityAt: incoming.sidechatLastActivityAt ?? null,
     sidechatExpiredAt: incoming.sidechatExpiredAt ?? null,
     lastKnownPr,
@@ -1824,6 +1845,8 @@ export function normalizeThreadShellSnapshot(
   incoming: ShellSnapshotThread,
   previous: Thread | undefined,
   snapshotSequence?: number,
+  /** `restoringSession`: see resolveInitialLastVisitedAt. */
+  options: { readonly restoringSession?: boolean } = {},
 ): {
   shell: ThreadShell;
   session: ThreadSession | null;
@@ -1856,7 +1879,7 @@ export function normalizeThreadShellSnapshot(
       ? previous.lastKnownPr
       : (incoming.lastKnownPr ?? null);
   const error = normalizeThreadErrorMessage(incoming.session?.lastError);
-  const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
+  const lastVisitedAt = previous?.lastVisitedAt ?? resolveInitialLastVisitedAt(incoming, options);
   const nextWorktreePath = incoming.worktreePath;
   const nextWorkingDirectory = incoming.workingDirectory ?? null;
   const nextAssociatedWorktreePath = incoming.associatedWorktreePath ?? null;
@@ -1899,7 +1922,6 @@ export function normalizeThreadShellSnapshot(
     settledAt: incoming.settledAt ?? null,
     updatedAt: incoming.updatedAt,
     isPinned: incoming.isPinned ?? false,
-    userStatus: incoming.userStatus ?? null,
     envMode: incoming.envMode ?? "local",
     branch: resolvedBranch,
     worktreePath: nextWorktreePath,
@@ -1916,6 +1938,7 @@ export function normalizeThreadShellSnapshot(
     subagentRole: incoming.subagentRole ?? null,
     forkSourceThreadId: incoming.forkSourceThreadId ?? null,
     sidechatSourceThreadId: incoming.sidechatSourceThreadId ?? null,
+    sidechatContext: incoming.sidechatContext ?? null,
     sidechatLastActivityAt: incoming.sidechatLastActivityAt ?? null,
     sidechatExpiredAt: incoming.sidechatExpiredAt ?? null,
     lastKnownPr,
@@ -2027,7 +2050,7 @@ function toLegacySessionStatus(
   }
 }
 
-function toLegacyProvider(providerName: string | null): ProviderKind {
+export function toLegacyProvider(providerName: string | null): ProviderKind {
   if (
     providerName === "codex" ||
     providerName === "claudeAgent" ||
@@ -2037,7 +2060,8 @@ function toLegacyProvider(providerName: string | null): ProviderKind {
     providerName === "droid" ||
     providerName === "opencode" ||
     providerName === "pi" ||
-    providerName === "devin"
+    providerName === "devin" ||
+    providerName === "omp"
   ) {
     return providerName;
   }
@@ -2061,6 +2085,7 @@ export function resolveThreadSidebarMetadata(
   | "hasPendingUserInput"
   | "hasActionableProposedPlan"
   | "hasLiveTailWork"
+  | "pendingBackgroundWorkCount"
 > {
   const needsDerivedMetadata =
     thread.latestUserMessageAt === undefined ||
@@ -2097,5 +2122,11 @@ export function resolveThreadSidebarMetadata(
         session: thread.session,
       }),
     ),
+    pendingBackgroundWorkCount:
+      derivePendingBackgroundWork({
+        activities: thread.activities,
+        latestTurn: thread.latestTurn,
+        session: thread.session,
+      })?.count ?? 0,
   };
 }

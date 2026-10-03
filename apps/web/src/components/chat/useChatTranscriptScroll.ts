@@ -43,7 +43,6 @@ export function useChatTranscriptScroll({
 
   const isAtEndRef = useRef(true);
   const autoFollowThreadIdRef = useRef<ThreadId | null>(null);
-  const previousFollowThreadIdRef = useRef<ThreadId | null | undefined>(undefined);
   const pendingInteractionAnchorRef = useRef<{
     element: HTMLElement;
     top: number;
@@ -431,6 +430,20 @@ export function useChatTranscriptScroll({
     scrollToEnd,
     setTranscriptScrollDetached,
   ]);
+  // A thread switch hands scroll ownership back to follow. This must be a
+  // layout effect declared before the auto-follow effect below: that effect
+  // reads the detached ref in the same commit, and a passive reset would run
+  // after it had already skipped the new thread, without re-triggering it.
+  useLayoutEffect(() => {
+    isAtEndRef.current = true;
+    settledScrollRequestRef.current += 1;
+    settledScrollInFlightRef.current = false;
+    programmaticScrollUntilRef.current = 0;
+    setTranscriptScrollDetached(false);
+    showScrollDebouncer.current.cancel();
+    const settle = window.setTimeout(() => setShowScrollToBottom(false), 0);
+    return () => window.clearTimeout(settle);
+  }, [activeThreadId, setTranscriptScrollDetached]);
   useLayoutEffect(() => {
     const shouldFollowPendingTurn =
       activeThreadId !== null && autoFollowThreadIdRef.current === activeThreadId;
@@ -439,36 +452,18 @@ export function useChatTranscriptScroll({
     }
     // Re-apply the bottom stick only for real transcript messages; tool/work
     // rows can arrive quickly and should not churn scroll/layout work.
-    // LegendList can settle an end-scroll against a stale row estimate and
-    // leave a few dozen pixels. Keep pinning the DOM end for a handful of
-    // frames after the estimate catches up. The tail-anchor slide owns the
-    // scroll after a send; a re-snap here would hard-jump past that glide.
-    let cancelled = false;
-    let attempts = 0;
-    let frameId = 0;
-    const stickToEnd = () => {
-      if (cancelled || tailAnchorScrollInFlightRef.current || isUserScrollDetachedRef.current) {
+    const frameId = window.requestAnimationFrame(() => {
+      // The tail-anchor slide owns the scroll after a send; a re-snap here
+      // would hard-jump past the smooth slide mid-flight. Once the anchor
+      // settles the spacer keeps the end position exact, so nothing is missed.
+      if (tailAnchorScrollInFlightRef.current || isUserScrollDetachedRef.current) {
         return;
       }
-      const node = legendListRef.current?.getScrollableNode?.();
-      if (attempts === 0) {
-        const shouldAnimate = animateNextAutoFollowScrollRef.current;
-        animateNextAutoFollowScrollRef.current = false;
-        scrollToEnd(shouldAnimate);
-      } else if (node instanceof HTMLElement && !isScrollContainerNearBottom(node, 1)) {
-        programmaticScrollUntilRef.current = performance.now() + 200;
-        node.scrollTop = node.scrollHeight;
-      }
-      attempts += 1;
-      // Keep watching a few frames. The list can apply its estimated end, then
-      // replace that height a frame later and reopen the gap.
-      if (attempts < 8) {
-        frameId = window.requestAnimationFrame(stickToEnd);
-      }
-    };
-    frameId = window.requestAnimationFrame(stickToEnd);
+      const shouldAnimate = animateNextAutoFollowScrollRef.current;
+      animateNextAutoFollowScrollRef.current = false;
+      scrollToEnd(shouldAnimate);
+    });
     return () => {
-      cancelled = true;
       window.cancelAnimationFrame(frameId);
     };
   }, [activeThreadId, scrollToEnd, transcriptAutoFollowSignal]);
@@ -557,62 +552,6 @@ export function useChatTranscriptScroll({
         }
       });
   }, [legendListRef, cancelPendingScrollGesture, setTranscriptScrollDetached]);
-  useEffect(() => {
-    const previousThreadId = previousFollowThreadIdRef.current;
-    previousFollowThreadIdRef.current = activeThreadId;
-    if (previousThreadId === activeThreadId) {
-      return;
-    }
-    isAtEndRef.current = true;
-    settledScrollRequestRef.current += 1;
-    settledScrollInFlightRef.current = false;
-    programmaticScrollUntilRef.current = 0;
-    setTranscriptScrollDetached(false);
-    showScrollDebouncer.current.cancel();
-    // A remounted/switched timeline can report "not at end" before LegendList
-    // finishes initialScrollAtEnd. Arm follow for a live stream so the layout
-    // effect keeps re-sticking instead of treating that first report as a
-    // reader detach. Streaming starting on the same thread must not re-arm.
-    autoFollowThreadIdRef.current =
-      activeThreadId !== null && hasStreamingAssistantText ? activeThreadId : null;
-    const settle = window.setTimeout(() => setShowScrollToBottom(false), 0);
-    const followThreadId = autoFollowThreadIdRef.current;
-    let settleFrame = 0;
-    let settleAttempts = 0;
-    const retrySettledFollow = () => {
-      if (
-        previousFollowThreadIdRef.current !== followThreadId ||
-        followThreadId === null ||
-        settleAttempts >= 90
-      ) {
-        return;
-      }
-      settleAttempts += 1;
-      const node = legendListRef.current?.getScrollableNode?.();
-      if (legendListRef.current?.scrollToEnd) {
-        if (!(node instanceof HTMLElement) || !isScrollContainerNearBottom(node, 1)) {
-          scrollToEnd(false);
-        }
-        if (node instanceof HTMLElement && isScrollContainerNearBottom(node, 1)) {
-          return;
-        }
-      }
-      settleFrame = window.requestAnimationFrame(retrySettledFollow);
-    };
-    if (followThreadId !== null) {
-      settleFrame = window.requestAnimationFrame(retrySettledFollow);
-    }
-    return () => {
-      window.clearTimeout(settle);
-      window.cancelAnimationFrame(settleFrame);
-    };
-  }, [
-    activeThreadId,
-    hasStreamingAssistantText,
-    legendListRef,
-    scrollToEnd,
-    setTranscriptScrollDetached,
-  ]);
 
   const previousThreadIdRef = useRef(activeThreadId);
   const pendingStreamingThreadRef = useRef<ThreadId | null>(null);

@@ -15,9 +15,6 @@ import { ServerProviderAuthStatus } from "./server";
 export const SYNARA_GATEWAY_MAX_THREADS_PER_OPERATION = 20;
 export const SYNARA_GATEWAY_MAX_REQUEST_ID_LENGTH = 256;
 export const SYNARA_GATEWAY_MAX_WAIT_MS = 60_000;
-/** Root threads sit at depth 0; a subagent may spawn children while its own depth < this bound. */
-export const SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH = 3;
-export const SYNARA_GATEWAY_MAX_SUBAGENT_LABEL_LENGTH = 64;
 
 export const SynaraGatewayErrorCode = Schema.Literals([
   "caller_session_inactive",
@@ -69,6 +66,9 @@ export type SynaraContextResult = typeof SynaraContextResult.Type;
 
 export const SynaraCreateThreadSpec = Schema.Struct({
   prompt: Schema.String.check(Schema.isNonEmpty()),
+  contextMessageIds: Schema.optional(
+    Schema.Array(Schema.String.check(Schema.isNonEmpty())).check(Schema.isMaxLength(16)),
+  ),
   notifyCreatorOnComplete: Schema.optional(Schema.Boolean),
   title: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   target: ModelSelection,
@@ -83,22 +83,6 @@ export const SynaraCreateThreadSpec = Schema.Struct({
   // External integrations need the "computer:control" scope; provider sessions
   // cannot delegate computer control to created threads.
   enableComputerControl: Schema.optional(Schema.Boolean),
-  // "subagent" binds the thread to the calling thread (parentThreadId) so it
-  // nests under it as a supervised worker. Only provider sessions can spawn
-  // subagents; external clients have no caller thread.
-  // "sidekick" is the hidden /fusion worker. It binds like a subagent and
-  // rejects caller-supplied role and nickname.
-  spawnAs: Schema.optional(Schema.Literals(["standalone", "subagent", "sidekick"])),
-  role: Schema.optional(
-    Schema.String.check(Schema.isNonEmpty()).check(
-      Schema.isMaxLength(SYNARA_GATEWAY_MAX_SUBAGENT_LABEL_LENGTH),
-    ),
-  ),
-  nickname: Schema.optional(
-    Schema.String.check(Schema.isNonEmpty()).check(
-      Schema.isMaxLength(SYNARA_GATEWAY_MAX_SUBAGENT_LABEL_LENGTH),
-    ),
-  ),
 });
 export type SynaraCreateThreadSpec = typeof SynaraCreateThreadSpec.Type;
 
@@ -175,6 +159,9 @@ export const SynaraCreatedThreadResult = Schema.Struct({
   environment: Schema.Literals(["local", "worktree"]),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  /** Ready-to-use markdown link target for the created thread
+   * (`thread://<threadId>`) — renders as a clickable thread link. */
+  link: Schema.optional(Schema.String),
   status: Schema.Literal("task_dispatched"),
 });
 export type SynaraCreatedThreadResult = typeof SynaraCreatedThreadResult.Type;

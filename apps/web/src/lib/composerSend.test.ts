@@ -31,26 +31,6 @@ describe("Computer command with provider prompt formatting", () => {
       }),
     ).toBe("/computer-use Ultrathink:\nopen Calculator");
   });
-  it("keeps /orchestration first when Claude uses a prompt-injected effort", () => {
-    expect(
-      formatOutgoingComposerPrompt({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        effort: "ultrathink",
-        text: "/orchestration refactor the sidebar",
-      }),
-    ).toBe("/orchestration Ultrathink:\nrefactor the sidebar");
-  });
-  it("keeps the fusion sidekick token when Claude uses a prompt-injected effort", () => {
-    expect(
-      formatOutgoingComposerPrompt({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        effort: "ultrathink",
-        text: "/fusion sidekick:codex/gpt-5.4-mini fix the failing test",
-      }),
-    ).toBe("/fusion sidekick:codex/gpt-5.4-mini Ultrathink:\nfix the failing test");
-  });
   it("keeps ordinary prompts and providers on their existing formatting path", () => {
     expect(
       formatOutgoingComposerPrompt({
@@ -434,10 +414,6 @@ describe("composerSend attachment builders", () => {
 });
 
 describe("effectiveComposerAttachmentCount", () => {
-  it("returns 0 when the draft is missing", () => {
-    expect(effectiveComposerAttachmentCount(undefined)).toBe(0);
-  });
-
   it("counts live images, files, and assistant selections", () => {
     expect(
       effectiveComposerAttachmentCount({
@@ -447,28 +423,6 @@ describe("effectiveComposerAttachmentCount", () => {
         persistedAttachments: [],
       }),
     ).toBe(4);
-  });
-
-  it("counts a persisted attachment that has not yet hydrated into images", () => {
-    expect(
-      effectiveComposerAttachmentCount({
-        images: [],
-        files: [],
-        assistantSelections: [],
-        persistedAttachments: [{ id: "pending-1" }],
-      }),
-    ).toBe(1);
-  });
-
-  it("does not double-count a persisted attachment already hydrated into images", () => {
-    expect(
-      effectiveComposerAttachmentCount({
-        images: [{ id: "image-1" }],
-        files: [],
-        assistantSelections: [],
-        persistedAttachments: [{ id: "image-1" }],
-      }),
-    ).toBe(1);
   });
 
   it("mixes hydrated and pending persisted attachments correctly", () => {

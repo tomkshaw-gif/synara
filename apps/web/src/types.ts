@@ -17,6 +17,7 @@ import type {
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
   ThreadHandoff,
+  ThreadSidechatContext,
   ProjectScript as ContractProjectScript,
   ThreadId,
   ProjectId,
@@ -26,6 +27,7 @@ import type {
   MessageId,
   ProviderMentionReference,
   ProviderSkillReference,
+  ProviderInstanceId,
   ProviderKind,
   CheckpointRef,
   ProviderInteractionMode,
@@ -33,8 +35,8 @@ import type {
   RuntimeMode,
   ThreadCreationSource,
   ThreadEnvironmentMode,
-  ThreadUserStatus,
 } from "@synara/contracts";
+import type { ProjectAppearance } from "./lib/projectAppearance";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
@@ -191,6 +193,8 @@ export interface Project {
   remoteName: string;
   folderName: string;
   localName: string | null;
+  /** Local look in the sidebar and rail; missing or null is the default folder. */
+  appearance?: ProjectAppearance | null;
   cwd: string;
   defaultModelSelection: ModelSelection | null;
   expanded: boolean;
@@ -267,6 +271,7 @@ export interface Thread extends ThreadWorkspaceState {
   subagentRole?: string | null;
   forkSourceThreadId?: ThreadId | null;
   sidechatSourceThreadId?: ThreadId | null;
+  sidechatContext?: ThreadSidechatContext | null;
   sidechatLastActivityAt?: string | null;
   sidechatExpiredAt?: string | null;
   handoff?: ThreadHandoff | null;
@@ -280,8 +285,6 @@ export interface Thread extends ThreadWorkspaceState {
   hasPendingUserInput?: boolean;
   hasActionableProposedPlan?: boolean;
   pendingInteractions?: OrchestrationPendingInteraction[];
-  /** User-assigned triage status ("Move to Status"); independent of runtime/unread state. */
-  userStatus?: ThreadUserStatus | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
 }
@@ -318,6 +321,7 @@ export interface ThreadShell extends ThreadWorkspaceState {
   subagentRole?: string | null;
   forkSourceThreadId?: ThreadId | null;
   sidechatSourceThreadId?: ThreadId | null;
+  sidechatContext?: ThreadSidechatContext | null;
   sidechatLastActivityAt?: string | null;
   sidechatExpiredAt?: string | null;
   handoff?: ThreadHandoff | null;
@@ -331,8 +335,6 @@ export interface ThreadShell extends ThreadWorkspaceState {
   hasActionableProposedPlan?: boolean;
   pendingInteractions?: OrchestrationPendingInteraction[];
   lastVisitedAt?: string | undefined;
-  /** User-assigned triage status ("Move to Status"); independent of runtime/unread state. */
-  userStatus?: ThreadUserStatus | null;
 }
 
 export interface ThreadTurnState {
@@ -359,8 +361,6 @@ export interface SidebarThreadSummary {
   settledAt?: string | null;
   updatedAt?: string | undefined;
   isPinned?: boolean;
-  /** User-assigned triage status ("Move to Status"); independent of runtime/unread state. */
-  userStatus?: ThreadUserStatus | null;
   latestTurn: OrchestrationLatestTurn | null;
   lastVisitedAt?: string | undefined;
   parentThreadId?: ThreadId | null;
@@ -374,8 +374,10 @@ export interface SidebarThreadSummary {
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
   hasLiveTailWork: boolean;
+  pendingBackgroundWorkCount: number;
   forkSourceThreadId?: ThreadId | null;
   sidechatSourceThreadId?: ThreadId | null;
+  sidechatContext?: ThreadSidechatContext | null;
   sidechatLastActivityAt?: string | null;
   sidechatExpiredAt?: string | null;
   handoff?: ThreadHandoff | null;
@@ -396,6 +398,7 @@ export interface ComposerThreadMentionSource {
 
 export interface ThreadSession {
   provider: ProviderKind;
+  providerInstanceId?: ProviderInstanceId;
   status: SessionPhase | "error" | "closed";
   activeTurnId?: TurnId | undefined;
   createdAt: string;

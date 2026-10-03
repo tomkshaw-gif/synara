@@ -18,8 +18,8 @@ import {
   APPROVAL_ALREADY_ANSWERED_INVARIANT_MARKER,
   THREAD_NOT_ARCHIVED_INVARIANT_MARKER,
 } from "@synara/shared/errorMessages";
-import { SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH } from "@synara/contracts";
 import {
+  isGroupContainerKind,
   isLegacyHomeChatContainerRow as isSharedLegacyHomeChatContainerRow,
   isOrdinaryProjectRow as isSharedOrdinaryProjectRow,
 } from "@synara/shared/projectContainers";
@@ -219,8 +219,8 @@ export function isLegacyHomeChatContainerRow(input: {
 
 /**
  * Server half of the web's project partitioning: ordinary projects are the user-visible
- * ones. Managed chat and Studio containers are excluded by kind alone; the legacy Home
- * chat container kept `kind: "project"` and is recognized by its row shape instead.
+ * ones. Managed chat, Studio, and group containers are excluded by kind alone; the legacy
+ * Home chat container kept `kind: "project"` and is recognized by its row shape instead.
  */
 export function isOrdinaryProjectRow(input: {
   readonly projectKind: ProjectKind | undefined;
@@ -228,6 +228,9 @@ export function isOrdinaryProjectRow(input: {
   readonly projectWorkspaceRoot: string;
   readonly workspacePaths: SpaceAssignmentWorkspacePaths | undefined;
 }): boolean {
+  if (isGroupContainerKind(input.projectKind)) {
+    return false;
+  }
   return isSharedOrdinaryProjectRow({
     projectKind: input.projectKind,
     projectTitle: input.projectTitle,
@@ -424,63 +427,6 @@ export function requireThreadAbsent(input: {
       input.command.type,
       `Thread '${input.threadId}' already exists and cannot be created twice.`,
     ),
-  );
-}
-
-/**
- * Validates a `thread.create` parent link: the parent must be a live thread in the
- * same project, and the child must fit inside the subagent nesting cap. Parentage
- * is assigned only at create time, so the ancestor walk doubles as the cycle guard.
- */
-export function requireSubagentThreadParent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly parentThreadId: ThreadId;
-  readonly projectId: ProjectId;
-}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError> {
-  return requireThreadNotArchived({
-    readModel: input.readModel,
-    command: input.command,
-    threadId: input.parentThreadId,
-  }).pipe(
-    Effect.flatMap((parent) => {
-      if (parent.projectId !== input.projectId) {
-        return Effect.fail(
-          invariantError(
-            input.command.type,
-            `Subagent parent thread '${input.parentThreadId}' belongs to a different project.`,
-          ),
-        );
-      }
-      let depth = 0;
-      let ancestorId = parent.parentThreadId ?? null;
-      const seen = new Set<ThreadId>([input.parentThreadId]);
-      while (ancestorId !== null) {
-        if (seen.has(ancestorId)) {
-          return Effect.fail(
-            invariantError(
-              input.command.type,
-              `Subagent parent thread '${input.parentThreadId}' has a cyclic ancestry.`,
-            ),
-          );
-        }
-        seen.add(ancestorId);
-        depth += 1;
-        const ancestor = findThreadById(input.readModel, ancestorId);
-        ancestorId = ancestor?.parentThreadId ?? null;
-      }
-      // The child would sit one level under the parent, so reject once the
-      // parent's ancestor count already reaches the cap minus one level.
-      if (depth + 1 > SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH) {
-        return Effect.fail(
-          invariantError(
-            input.command.type,
-            `Subagent nesting is limited to ${SYNARA_GATEWAY_MAX_SUBAGENT_DEPTH} levels; thread '${input.parentThreadId}' is already at the deepest level.`,
-          ),
-        );
-      }
-      return Effect.succeed(parent);
-    }),
   );
 }
 

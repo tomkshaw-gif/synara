@@ -4,7 +4,10 @@ import {
   normalizeSidebarProjectThreadListCwd,
   persistSidebarUiState,
   readSidebarUiState,
+  readSidebarUiStateSnapshot,
+  subscribeSidebarUiStateWrites,
 } from "./Sidebar.uiState";
+import type { ActivityScopeSelection } from "./SidebarActivityView.logic";
 
 describe("Sidebar.uiState", () => {
   let storage = new Map<string, string>();
@@ -26,6 +29,8 @@ describe("Sidebar.uiState", () => {
             storage.set(key, value);
           },
         },
+        addEventListener: () => {},
+        removeEventListener: () => {},
       },
     });
   });
@@ -34,15 +39,37 @@ describe("Sidebar.uiState", () => {
     Reflect.deleteProperty(globalThis, "window");
   });
 
+  it("tells same-tab readers about writes and keeps one snapshot between them", () => {
+    let writes = 0;
+    const unsubscribe = subscribeSidebarUiStateWrites(() => {
+      writes += 1;
+    });
+    const before = readSidebarUiStateSnapshot();
+    expect(readSidebarUiStateSnapshot()).toBe(before);
+
+    persistSidebarUiState({
+      ...readSidebarUiState(),
+      dismissedThreadStatusKeyByThreadId: { "thread-1": "Pending Approval:turn-1" },
+    });
+
+    expect(writes).toBe(1);
+    expect(readSidebarUiStateSnapshot().dismissedThreadStatusKeyByThreadId).toEqual({
+      "thread-1": "Pending Approval:turn-1",
+    });
+    unsubscribe();
+    persistSidebarUiState(readSidebarUiState());
+    expect(writes).toBe(1);
+  });
+
   it("defaults collapsed sidebar UI state with no thread list paging", () => {
     expect(readSidebarUiState()).toEqual({
       chatSectionExpanded: false,
       chatThreadListExtraPages: 0,
       projectThreadListExtraPagesByCwd: {},
       dismissedThreadStatusKeyByThreadId: {},
-      threadChildExpansionByThreadId: {},
       lastThreadRoute: null,
       activityViewEnabled: false,
+      activityScope: null,
     });
   });
 
@@ -58,14 +85,12 @@ describe("Sidebar.uiState", () => {
       dismissedThreadStatusKeyByThreadId: {
         "thread-123": "Plan Ready:turn-1",
       },
-      threadChildExpansionByThreadId: {
-        "thread-123": true,
-      },
       lastThreadRoute: {
         threadId: "thread-123",
         splitViewId: "split-456",
       },
       activityViewEnabled: true,
+      activityScope: "project-123" as ActivityScopeSelection,
     });
 
     expect(readSidebarUiState()).toEqual({
@@ -79,14 +104,12 @@ describe("Sidebar.uiState", () => {
       dismissedThreadStatusKeyByThreadId: {
         "thread-123": "Plan Ready:turn-1",
       },
-      threadChildExpansionByThreadId: {
-        "thread-123": true,
-      },
       lastThreadRoute: {
         threadId: "thread-123",
         splitViewId: "split-456",
       },
       activityViewEnabled: true,
+      activityScope: "project-123",
     });
   });
 
@@ -108,15 +131,11 @@ describe("Sidebar.uiState", () => {
           "": "bad",
           "thread-456": 42,
         },
-        threadChildExpansionByThreadId: {
-          "thread-ok": false,
-          "": true,
-          "thread-bad": "yes",
-        },
         lastThreadRoute: {
           threadId: "thread-123",
           splitViewId: 42,
         },
+        activityScope: 42,
       }),
     );
 
@@ -129,13 +148,11 @@ describe("Sidebar.uiState", () => {
       dismissedThreadStatusKeyByThreadId: {
         "thread-123": "Awaiting Input:turn-2",
       },
-      threadChildExpansionByThreadId: {
-        "thread-ok": false,
-      },
       lastThreadRoute: {
         threadId: "thread-123",
       },
       activityViewEnabled: false,
+      activityScope: null,
     });
   });
 
@@ -174,9 +191,9 @@ describe("Sidebar.uiState", () => {
       chatThreadListExtraPages: 0,
       projectThreadListExtraPagesByCwd: {},
       dismissedThreadStatusKeyByThreadId: {},
-      threadChildExpansionByThreadId: {},
       lastThreadRoute: null,
       activityViewEnabled: false,
+      activityScope: null,
     });
   });
 });

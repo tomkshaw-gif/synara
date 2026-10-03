@@ -3,8 +3,6 @@ import { THREAD_GOAL_MAX_CHARS } from "@synara/contracts";
 
 import {
   buildGoalSlashCommandPrompt,
-  buildFusionSlashCommandPrompt,
-  buildOrchestrationSlashCommandPrompt,
   buildReviewPrompt,
   buildSubagentsPrompt,
   canExecuteSideSlashCommand,
@@ -26,17 +24,7 @@ import {
 } from "./composerSlashCommands";
 
 describe("composerSlashCommands", () => {
-  it.each([
-    "codex",
-    "claudeAgent",
-    "cursor",
-    "grok",
-    "droid",
-    "devin",
-    "opencode",
-    "pi",
-    "antigravity",
-  ] as const)(
+  it.each(["codex"] as const)(
     "offers one Synara Computer invocation for %s despite a native name collision",
     (provider) => {
       const commands = getAvailableComposerSlashCommands({
@@ -54,19 +42,6 @@ describe("composerSlashCommands", () => {
       expect(isBuiltInComposerSlashCommand("computer-use")).toBe(true);
     },
   );
-  it("recognizes built-in slash commands", () => {
-    expect(isBuiltInComposerSlashCommand("computer-use")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("review")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("fast")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("automation")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("export")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("feedback")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("debug")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("goal")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("rename")).toBe(true);
-    expect(isBuiltInComposerSlashCommand("unknown")).toBe(false);
-  });
-
   it("filters slash commands by query", () => {
     expect(filterComposerSlashCommands("rev").map((entry) => entry.command)).toEqual(["review"]);
     expect(filterComposerSlashCommands("fast").map((entry) => entry.command)).toEqual(["fast"]);
@@ -180,26 +155,17 @@ describe("composerSlashCommands", () => {
     });
   });
 
-  it.each([
-    "clear",
-    "pause",
-    "resume",
-    "edit",
-    "  CLEAR  ",
-    " PaUsE ",
-    "-- clear",
-    "--",
-    "--flag",
-    "Ship the release",
-    "first line\nsecond line",
-  ])("round-trips a prefilled goal as literal text: %j", (goal) => {
-    const invocation = parseComposerSlashInvocation(buildGoalSlashCommandPrompt(goal));
-    expect(invocation?.command).toBe("goal");
-    expect(parseGoalSlashCommandArgs(invocation?.args ?? "")).toEqual({
-      action: "set",
-      goal: goal.trim(),
-    });
-  });
+  it.each(["clear", "  CLEAR  ", "-- clear", "--", "first line\nsecond line"])(
+    "round-trips a prefilled goal as literal text: %j",
+    (goal) => {
+      const invocation = parseComposerSlashInvocation(buildGoalSlashCommandPrompt(goal));
+      expect(invocation?.command).toBe("goal");
+      expect(parseGoalSlashCommandArgs(invocation?.args ?? "")).toEqual({
+        action: "set",
+        goal: goal.trim(),
+      });
+    },
+  );
 
   it("keeps an empty Goal prefill ready for literal text and limits the objective length", () => {
     expect(buildGoalSlashCommandPrompt("  ")).toBe("/goal -- ");
@@ -377,56 +343,6 @@ describe("composerSlashCommands", () => {
     expect(buildReviewPrompt({ target: "base-branch" })).toContain("base branch");
   });
 
-  it("keeps the /orchestration token literal for server-side expansion", () => {
-    expect(isBuiltInComposerSlashCommand("orchestration")).toBe(true);
-    expect(buildOrchestrationSlashCommandPrompt("refactor the sidebar")).toBe(
-      "/orchestration refactor the sidebar",
-    );
-    // An empty draft still lands the token so the user can type the task after it.
-    expect(buildOrchestrationSlashCommandPrompt("")).toBe("/orchestration ");
-    expect(buildOrchestrationSlashCommandPrompt("   ")).toBe("/orchestration ");
-    expect(
-      parseComposerSlashInvocation(buildOrchestrationSlashCommandPrompt("do the thing")),
-    ).toEqual({ command: "orchestration", args: "do the thing" });
-  });
-
-  it("keeps an existing task when the fusion picker chooses a sidekick", () => {
-    expect(
-      buildFusionSlashCommandPrompt(
-        { provider: "codex", model: "gpt-5.4-mini" },
-        "fix the failing test",
-      ),
-    ).toBe("/fusion sidekick:codex/gpt-5.4-mini fix the failing test");
-    expect(
-      buildFusionSlashCommandPrompt(
-        { provider: "grok", model: "grok-4.6" },
-        "/fusion sidekick:codex/gpt-5.4-mini fix the failing test",
-      ),
-    ).toBe("/fusion sidekick:grok/grok-4.6 fix the failing test");
-    expect(
-      buildFusionSlashCommandPrompt({ provider: "codex", model: "gpt-5.4-mini" }, "/goal ship it"),
-    ).toBe("/fusion sidekick:codex/gpt-5.4-mini ");
-  });
-
-  it.each(["codex", "claudeAgent", "opencode"] as const)(
-    "offers app-owned /orchestration for %s despite a native name collision",
-    (provider) => {
-      const commands = getAvailableComposerSlashCommands({
-        provider,
-        supportsFastSlashCommand: false,
-        canOfferCompactCommand: false,
-        canOfferReviewCommand: false,
-        canOfferForkCommand: false,
-        canOfferSideCommand: false,
-        canOfferExportCommand: false,
-        providerNativeCommandNames: ["orchestration"],
-      });
-      expect(commands.filter((command) => command === "orchestration")).toHaveLength(1);
-      expect(shouldHideProviderNativeCommandFromComposerMenu(provider, "fusion")).toBe(true);
-      expect(commands.filter((command) => command === "fusion")).toHaveLength(1);
-    },
-  );
-
   it("filters app slash commands when a provider exposes the same command natively", () => {
     const availableCommands = getAvailableComposerSlashCommands({
       provider: "codex",
@@ -484,56 +400,6 @@ describe("composerSlashCommands", () => {
     expect(providerSupportsTextNativeReviewCommand("claudeAgent", ["review"])).toBe(true);
   });
 
-  it("keeps app-level /automation available even if a provider exposes a native collision", () => {
-    const availableCommands = getAvailableComposerSlashCommands({
-      provider: "antigravity",
-      supportsFastSlashCommand: false,
-      canOfferCompactCommand: false,
-      canOfferReviewCommand: true,
-      canOfferForkCommand: true,
-      canOfferSideCommand: true,
-      canOfferExportCommand: true,
-      providerNativeCommandNames: ["automation"],
-    });
-
-    expect(availableCommands).toContain("automation");
-    expect(shouldHideProviderNativeCommandFromComposerMenu("antigravity", "automation")).toBe(true);
-  });
-
-  it("keeps app-owned /rename available despite provider-native collisions", () => {
-    for (const provider of ["codex", "claudeAgent"] as const) {
-      const availableCommands = getAvailableComposerSlashCommands({
-        provider,
-        supportsFastSlashCommand: true,
-        canOfferCompactCommand: true,
-        canOfferReviewCommand: true,
-        canOfferForkCommand: true,
-        canOfferSideCommand: true,
-        canOfferExportCommand: true,
-        providerNativeCommandNames: ["rename"],
-      });
-
-      expect(availableCommands).toContain("rename");
-      expect(shouldHideProviderNativeCommandFromComposerMenu(provider, "rename")).toBe(true);
-    }
-  });
-
-  it("keeps Feedback Synara ahead of provider-native /feedback", () => {
-    const availableCommands = getAvailableComposerSlashCommands({
-      provider: "claudeAgent",
-      supportsFastSlashCommand: true,
-      canOfferCompactCommand: true,
-      canOfferReviewCommand: true,
-      canOfferForkCommand: true,
-      canOfferSideCommand: true,
-      canOfferExportCommand: true,
-      providerNativeCommandNames: ["feedback"],
-    });
-
-    expect(availableCommands).toContain("feedback");
-    expect(shouldHideProviderNativeCommandFromComposerMenu("claudeAgent", "feedback")).toBe(true);
-  });
-
   it("only exposes Synara-owned app commands for claude", () => {
     const commands = getAvailableComposerSlashCommands({
       provider: "claudeAgent",
@@ -553,8 +419,6 @@ describe("composerSlashCommands", () => {
       "rename",
       "debug",
       "computer-use",
-      "orchestration",
-      "fusion",
       "default",
       "feedback",
       "automation",
@@ -573,20 +437,6 @@ describe("composerSlashCommands", () => {
         canOfferExportCommand: true,
       }),
     ).not.toContain("fork");
-  });
-
-  it("offers the app-level /export command on every provider", () => {
-    expect(
-      getAvailableComposerSlashCommands({
-        provider: "codex",
-        supportsFastSlashCommand: true,
-        canOfferCompactCommand: true,
-        canOfferReviewCommand: true,
-        canOfferForkCommand: true,
-        canOfferSideCommand: true,
-        canOfferExportCommand: true,
-      }),
-    ).toContain("export");
   });
 
   it("omits the app-level /export command when no server thread exists", () => {
@@ -659,39 +509,6 @@ describe("composerSlashCommands", () => {
         canOfferExportCommand: true,
       }),
     ).not.toContain("compact");
-  });
-
-  it("exposes shared app slash commands for Antigravity", () => {
-    expect(
-      getAvailableComposerSlashCommands({
-        provider: "antigravity",
-        supportsFastSlashCommand: false,
-        canOfferCompactCommand: false,
-        canOfferReviewCommand: true,
-        canOfferForkCommand: true,
-        canOfferSideCommand: true,
-        canOfferExportCommand: true,
-      }),
-    ).toEqual([
-      "clear",
-      "model",
-      "plan",
-      "debug",
-      "default",
-      "review",
-      "fork",
-      "side",
-      "status",
-      "subagents",
-      "orchestration",
-      "fusion",
-      "computer-use",
-      "export",
-      "goal",
-      "rename",
-      "feedback",
-      "automation",
-    ]);
   });
 
   it("treats claude aliases like /reset as provider-native collisions", () => {

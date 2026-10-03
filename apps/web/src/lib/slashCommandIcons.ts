@@ -21,8 +21,6 @@ import {
   MessageCircleIcon,
   Minimize2,
   TemporaryThreadIcon,
-  UsersIcon,
-  WorkflowIcon,
 } from "./icons";
 
 // Reuse the app's existing icon components for each concept so slash commands
@@ -41,8 +39,6 @@ export const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   side: TemporaryThreadIcon,
   status: InfoIcon,
   subagents: BotIcon,
-  orchestration: WorkflowIcon,
-  fusion: UsersIcon,
   feedback: BugIcon,
   automation: ClockIcon,
   goal: GoalIcon,

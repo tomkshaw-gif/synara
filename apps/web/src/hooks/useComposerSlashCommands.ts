@@ -1,19 +1,16 @@
 import {
   PROVIDER_DISPLAY_NAMES,
   THREAD_GOAL_MAX_CHARS,
-  type DevinModelOptions,
   type MessageId,
   type ModelSelection,
   type OrchestrationShellSnapshot,
   type ProviderInteractionMode,
   type ProviderKind,
-  type ProviderModelDescriptor,
   type ProviderNativeCommandDescriptor,
   type ProviderModelOptions,
   type RuntimeMode,
   type ThreadId,
 } from "@synara/contracts";
-import { parseFusionInvocation } from "@synara/shared/fusionInvocation";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
@@ -34,15 +31,11 @@ import {
   parseSideSlashCommandArgs,
   type ForkSlashCommandTarget,
 } from "../composerSlashCommands";
-import {
-  buildThreadHandoffImportedMessages,
-  resolveThreadHandoffModelSelection,
-} from "../lib/threadHandoff";
-import { devinFusionFastModePatch } from "../lib/devinFusion";
+import { resolveThreadHandoffModelSelection } from "../lib/threadHandoff";
 import { toastManager } from "../components/ui/toast";
 import type { ComposerCommandItem } from "../components/chat/ComposerCommandMenu";
 import { buildNextProviderOptions } from "../providerModelOptions";
-import { resolveForkThreadEnvironment } from "../lib/threadEnvironment";
+import { dispatchThreadFork } from "../lib/threadFork";
 import { type SplitViewId } from "../splitViewStore";
 import { useRightDockStore } from "../rightDockStore";
 import { registerSidechatCreator } from "../lib/sidechatCreatorRegistry";
@@ -64,6 +57,7 @@ import {
   sendSidechatPrompt,
   type SidechatCreationFlight,
 } from "../lib/sidechatCreation";
+import { isSidechatThread } from "@synara/shared/sidechatThread";
 
 type ComposerSnapshot = {
   value: string;
@@ -95,7 +89,6 @@ export function useComposerSlashCommands(input: {
   selectedProvider: ProviderKind;
   currentProviderModelOptions: ProviderModelOptions[ProviderKind] | undefined;
   selectedModelSelection: ModelSelection;
-  selectedRuntimeModel?: ProviderModelDescriptor | undefined;
   environmentMode: string | null;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -149,7 +142,6 @@ export function useComposerSlashCommands(input: {
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
-    selectedRuntimeModel,
     environmentMode,
     runtimeMode,
     interactionMode,
@@ -221,37 +213,18 @@ export function useComposerSlashCommands(input: {
 
   const setFastModeFromSlashCommand = useCallback(
     (enabled: boolean) => {
-      // Fusion encodes its fast tier inside the pairing uid; a generic
-      // `fastMode` trait would be stripped at dispatch and do nothing.
-      const fusionPatch =
-        selectedProvider === "devin"
-          ? devinFusionFastModePatch({
-              modelVariants: selectedRuntimeModel?.modelVariants,
-              modelVariant: (currentProviderModelOptions as DevinModelOptions | undefined)
-                ?.modelVariant,
-              fast: enabled,
-            })
-          : null;
       setComposerDraftProviderModelOptions(
         threadId,
         selectedProvider,
-        buildNextProviderOptions(
-          selectedProvider,
-          currentProviderModelOptions,
-          fusionPatch ?? { fastMode: enabled },
-        ),
+        buildNextProviderOptions(selectedProvider, currentProviderModelOptions, {
+          fastMode: enabled,
+        }),
         {
           persistSticky: true,
         },
       );
     },
-    [
-      currentProviderModelOptions,
-      selectedProvider,
-      selectedRuntimeModel,
-      setComposerDraftProviderModelOptions,
-      threadId,
-    ],
+    [currentProviderModelOptions, selectedProvider, setComposerDraftProviderModelOptions, threadId],
   );
 
   const runFastSlashCommand = useCallback(
@@ -491,38 +464,15 @@ export function useComposerSlashCommands(input: {
         return true;
       }
 
-      const importedMessages = buildThreadHandoffImportedMessages(activeThread, {
-        throughMessageId: inputOptions?.throughMessageId ?? null,
-      });
-
-      const nextThreadId = newThreadId();
-      const createdAt = new Date().toISOString();
-      // Fork first, then let the normal first-send worktree bootstrap create the cwd if needed.
-      const resolvedTarget = resolveForkThreadEnvironment({
-        target: inputOptions?.target ?? "local",
-        activeRootBranch,
+      const nextThreadId = await dispatchThreadFork({
+        api,
         sourceThread: activeThread,
-      });
-
-      await api.orchestration.dispatchCommand({
-        type: "thread.fork.create",
-        commandId: newCommandId(),
-        threadId: nextThreadId,
-        sourceThreadId: activeThread.id,
-        projectId: activeProject.id,
-        title: activeThread.title,
+        target: inputOptions?.target ?? "local",
+        rootBranch: activeRootBranch,
         modelSelection: selectedModelSelection,
         runtimeMode,
         interactionMode,
-        envMode: resolvedTarget.envMode,
-        branch: resolvedTarget.branch,
-        worktreePath: resolvedTarget.worktreePath,
-        workingDirectory: activeThread.workingDirectory ?? null,
-        associatedWorktreePath: resolvedTarget.associatedWorktreePath,
-        associatedWorktreeBranch: resolvedTarget.associatedWorktreeBranch,
-        associatedWorktreeRef: resolvedTarget.associatedWorktreeRef,
-        importedMessages: [...importedMessages],
-        createdAt,
+        throughMessageId: inputOptions?.throughMessageId ?? null,
       });
       const snapshot = await api.orchestration.getShellSnapshot();
       syncServerShellSnapshot(snapshot);
@@ -551,7 +501,8 @@ export function useComposerSlashCommands(input: {
         !activeProject ||
         !activeThread ||
         !isServerThread ||
-        activeThread.sidechatSourceThreadId
+        // No sidechat of a sidechat, forked or standalone.
+        isSidechatThread(activeThread)
       ) {
         toastManager.add({
           type: "warning",
@@ -642,7 +593,7 @@ export function useComposerSlashCommands(input: {
   // Publish a stable host capability. Composer drafts, attachments, and modes only
   // affect whether `/side` is offered; they must not make the dock action disappear.
   useEffect(() => {
-    if (!activeProject || !activeThread || !isServerThread || activeThread.sidechatSourceThreadId) {
+    if (!activeProject || !activeThread || !isServerThread || isSidechatThread(activeThread)) {
       return;
     }
     return registerSidechatCreator(threadId, createSidechatFromSlashCommand);
@@ -934,30 +885,6 @@ export function useComposerSlashCommands(input: {
         editorActions.scheduleComposerFocus();
         return true;
       }
-      if (slashInvocation.command === "orchestration") {
-        if (slashInvocation.args) return false; // The normal send freezes one-turn orchestration mode.
-        toastManager.add({
-          type: "info",
-          title: "Add a task after /orchestration",
-          description: "For example: /orchestration refactor the sidebar into modules.",
-        });
-        editorActions.scheduleComposerFocus();
-        return true;
-      }
-      if (slashInvocation.command === "fusion") {
-        const fusion = parseFusionInvocation(trimmed);
-        // A named sidekick plus a task sends. The server expands the playbook.
-        if (fusion?.sidekick && fusion.prompt.trim().length > 0) return false;
-        toastManager.add({
-          type: "info",
-          title: fusion?.sidekick ? "Add a task after the sidekick" : "Pick a sidekick model",
-          description: fusion?.sidekick
-            ? "For example: /fusion sidekick:codex/gpt-5.4-mini fix the failing test."
-            : "Open + and choose Fusion, or write /fusion sidekick:codex/gpt-5.4-mini and the task. This thread's model stays the lead.",
-        });
-        editorActions.scheduleComposerFocus();
-        return true;
-      }
       if (slashInvocation.command === "clear") {
         editorActions.clearComposerSlashDraft();
         await handleClearConversation();
@@ -1240,36 +1167,6 @@ export function useComposerSlashCommands(input: {
 
       if (item.command === "computer-use") {
         const replacement = "/computer-use ";
-        const applied = editorActions.applyPromptReplacement(
-          trigger.rangeStart,
-          trigger.rangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
-        );
-        if (wasPromptReplacementApplied(applied)) {
-          editorActions.setComposerHighlightedItemId(null);
-          editorActions.scheduleComposerFocus();
-        }
-        return;
-      }
-
-      if (item.command === "orchestration") {
-        const replacement = "/orchestration ";
-        const applied = editorActions.applyPromptReplacement(
-          trigger.rangeStart,
-          trigger.rangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
-        );
-        if (wasPromptReplacementApplied(applied)) {
-          editorActions.setComposerHighlightedItemId(null);
-          editorActions.scheduleComposerFocus();
-        }
-        return;
-      }
-
-      if (item.command === "fusion") {
-        const replacement = "/fusion ";
         const applied = editorActions.applyPromptReplacement(
           trigger.rangeStart,
           trigger.rangeEnd,

@@ -5,20 +5,24 @@
 
 import { normalizeWorkspaceRootForComparison } from "@synara/shared/threadWorkspace";
 import type { LastThreadRoute } from "../chatRouteRestore";
+import type { ActivityScopeSelection } from "./SidebarActivityView.logic";
 
 const SIDEBAR_UI_STATE_STORAGE_KEY = "synara:sidebar-ui:v1";
+
+// Same-tab readers (the Inbox) hear the sidebar's own writes; "storage" events only
+// reach other tabs.
+const sameTabWriteListeners = new Set<() => void>();
 
 export type SidebarUiState = {
   chatSectionExpanded: boolean;
   chatThreadListExtraPages: number;
   projectThreadListExtraPagesByCwd: Record<string, number>;
   dismissedThreadStatusKeyByThreadId: Record<string, string>;
-  /** Per-parent disclosure override for child (subagent) thread rows: true pins the
-   *  group open, false pins it shut, absent falls back to live-worker auto-reveal. */
-  threadChildExpansionByThreadId: Record<string, boolean>;
   lastThreadRoute: LastThreadRoute | null;
   /** Swaps the Projects surface for the flat task-feed Activity view. */
   activityViewEnabled: boolean;
+  /** Project (or merged chats) the Activity feed is scoped to; null shows every project. */
+  activityScope: ActivityScopeSelection;
 };
 
 const DEFAULT_SIDEBAR_UI_STATE: SidebarUiState = {
@@ -26,9 +30,9 @@ const DEFAULT_SIDEBAR_UI_STATE: SidebarUiState = {
   chatThreadListExtraPages: 0,
   projectThreadListExtraPagesByCwd: {},
   dismissedThreadStatusKeyByThreadId: {},
-  threadChildExpansionByThreadId: {},
   lastThreadRoute: null,
   activityViewEnabled: false,
+  activityScope: null,
 };
 
 // Persisted paging is a request, not a promise: render-time clamping trims it to the real
@@ -44,6 +48,10 @@ function sanitizeThreadListExtraPages(value: unknown): number {
     return 0;
   }
   return Math.min(Math.max(0, Math.floor(value)), MAX_PERSISTED_THREAD_LIST_EXTRA_PAGES);
+}
+
+function sanitizeActivityScope(value: unknown): ActivityScopeSelection {
+  return typeof value === "string" && value.length > 0 ? (value as ActivityScopeSelection) : null;
 }
 
 function sanitizeProjectThreadListExtraPagesByCwd(
@@ -84,12 +92,12 @@ export function readSidebarUiState(): SidebarUiState {
       chatThreadListExpanded?: boolean;
       expandedProjectThreadListCwds?: string[];
       dismissedThreadStatusKeyByThreadId?: Record<string, string>;
-      threadChildExpansionByThreadId?: Record<string, unknown>;
       lastThreadRoute?: {
         threadId?: unknown;
         splitViewId?: unknown;
       } | null;
       activityViewEnabled?: boolean;
+      activityScope?: unknown;
     };
 
     const lastThreadRoute =
@@ -136,14 +144,9 @@ export function readSidebarUiState(): SidebarUiState {
             statusKey.length > 0,
         ),
       ),
-      threadChildExpansionByThreadId: Object.fromEntries(
-        Object.entries(parsed.threadChildExpansionByThreadId ?? {}).filter(
-          (entry): entry is [string, boolean] =>
-            entry[0].length > 0 && typeof entry[1] === "boolean",
-        ),
-      ),
       lastThreadRoute,
       activityViewEnabled: parsed.activityViewEnabled === true,
+      activityScope: sanitizeActivityScope(parsed.activityScope),
     };
   } catch {
     return DEFAULT_SIDEBAR_UI_STATE;
@@ -168,6 +171,46 @@ export function subscribeSidebarUiState(listener: (state: SidebarUiState) => voi
   return () => window.removeEventListener("storage", handleStorage);
 }
 
+let snapshotRaw: string | null | undefined;
+let snapshot: SidebarUiState = DEFAULT_SIDEBAR_UI_STATE;
+
+/**
+ * The persisted state, parsed again only when the stored text changed, so it keeps one
+ * reference between writes (as useSyncExternalStore requires).
+ */
+export function readSidebarUiStateSnapshot(): SidebarUiState {
+  if (typeof window === "undefined") {
+    return DEFAULT_SIDEBAR_UI_STATE;
+  }
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(SIDEBAR_UI_STATE_STORAGE_KEY);
+  } catch {
+    raw = null;
+  }
+  if (raw !== snapshotRaw) {
+    snapshotRaw = raw;
+    snapshot = readSidebarUiState();
+  }
+  return snapshot;
+}
+
+/** Notifies on every write of the sidebar UI state, from this tab or another. */
+export function subscribeSidebarUiStateWrites(listener: () => void): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === SIDEBAR_UI_STATE_STORAGE_KEY) listener();
+  };
+  sameTabWriteListeners.add(listener);
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    sameTabWriteListeners.delete(listener);
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
 export function persistSidebarUiState(input: SidebarUiState): void {
   if (typeof window === "undefined") {
     return;
@@ -187,11 +230,6 @@ export function persistSidebarUiState(input: SidebarUiState): void {
             ([threadId, statusKey]) => threadId.length > 0 && statusKey.length > 0,
           ),
         ),
-        threadChildExpansionByThreadId: Object.fromEntries(
-          Object.entries(input.threadChildExpansionByThreadId).filter(
-            ([threadId, expanded]) => threadId.length > 0 && typeof expanded === "boolean",
-          ),
-        ),
         lastThreadRoute: input.lastThreadRoute
           ? {
               threadId: input.lastThreadRoute.threadId,
@@ -201,9 +239,12 @@ export function persistSidebarUiState(input: SidebarUiState): void {
             }
           : null,
         activityViewEnabled: input.activityViewEnabled,
+        activityScope: sanitizeActivityScope(input.activityScope),
       }),
     );
   } catch {
     // Ignore storage errors so sidebar rendering keeps working when persistence is unavailable.
+    return;
   }
+  for (const listener of sameTabWriteListeners) listener();
 }

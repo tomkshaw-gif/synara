@@ -7,16 +7,18 @@ import { useMemo, type ReactNode } from "react";
 import { isGenericChatThreadTitle } from "@synara/shared/chatThreads";
 import { pluralize } from "@synara/shared/text";
 
+import { useThreadHasPendingDraft } from "../composerDraftStore";
 import { createThreadSelector } from "../storeSelectors";
 import { useStore } from "../store";
 import { resolveSubagentPresentationForThread } from "../lib/subagentPresentation";
 import { resolveThreadHandoffBadgeLabel } from "../lib/threadHandoff";
 import { SIDEBAR_ROW_LABEL_TEXT_CLASS_NAME } from "../sidebarRowStyles";
 import type { SidebarThreadSummary } from "../types";
-import { ChevronRightIcon, TerminalIcon } from "../lib/icons";
+import { TerminalIcon } from "../lib/icons";
 import { cn } from "../lib/utils";
 import { ProviderIcon } from "./ProviderIcon";
 import { SidebarGlyph } from "./sidebarGlyphs";
+import { SidebarDraftGlyph } from "./SidebarStatusTrailingGlyph";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 export interface SidebarThreadTerminalStatus {
@@ -171,7 +173,6 @@ export function SidebarThreadRowContent({
   isActive,
   variant,
   subagentIndentPx: subagentIndentPxProp,
-  childDisclosure,
   pendingStatusColorClass,
   suffix,
 }: {
@@ -182,74 +183,40 @@ export function SidebarThreadRowContent({
   isActive: boolean;
   variant: "pinned" | "standard";
   subagentIndentPx?: number;
-  /** Tree disclosure shown when the thread has child (subagent) rows. */
-  childDisclosure?:
-    | {
-        childCount: number;
-        expanded: boolean;
-        hasLiveDescendant: boolean;
-        onToggle: () => void;
-      }
-    | undefined;
   pendingStatusColorClass?: string | null | undefined;
   suffix?: ReactNode;
 }) {
   const subagentIndentPx = subagentIndentPxProp ?? 0;
   const isSubagentThread = Boolean(thread.parentThreadId);
+  const subagentPresentation =
+    variant === "standard" && isSubagentThread
+      ? resolveSubagentPresentationForThread({
+          thread: {
+            id: thread.id,
+            parentThreadId: thread.parentThreadId,
+            subagentAgentId: thread.subagentAgentId,
+            subagentNickname: thread.subagentNickname,
+            subagentRole: thread.subagentRole,
+            title: thread.title,
+          },
+        })
+      : null;
   const showThreadProviderAvatar = !isGenericChatThreadTitle(thread.title);
+  const hasPendingDraft = useThreadHasPendingDraft(thread.id);
 
   return (
     <>
-      {childDisclosure ? (
-        <button
-          type="button"
-          aria-label={
-            childDisclosure.expanded
-              ? `Hide ${childDisclosure.childCount} ${pluralize(childDisclosure.childCount, "worker thread")}`
-              : `Show ${childDisclosure.childCount} ${pluralize(childDisclosure.childCount, "worker thread")}`
-          }
-          aria-expanded={childDisclosure.expanded}
-          title={
-            childDisclosure.expanded
-              ? "Hide worker threads"
-              : `Show ${childDisclosure.childCount} ${pluralize(childDisclosure.childCount, "worker thread")}`
-          }
-          className={cn(
-            "inline-flex h-3.5 shrink-0 items-center gap-px rounded-sm text-muted-foreground/45 transition-colors hover:text-foreground",
-            childDisclosure.hasLiveDescendant && "text-muted-foreground/80",
-          )}
-          onPointerDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            childDisclosure.onToggle();
-          }}
-        >
-          <ChevronRightIcon
-            className={cn(
-              "size-3 transition-transform duration-150",
-              childDisclosure.expanded && "rotate-90",
-            )}
-          />
-          <span
-            className={cn(
-              "text-ui-xs leading-none tabular-nums",
-              childDisclosure.hasLiveDescendant && "font-medium",
-            )}
-          >
-            {childDisclosure.childCount}
-          </span>
-        </button>
-      ) : null}
       {variant === "standard" && isSubagentThread ? (
         <span
-          className="inline-flex size-3.5 shrink-0 items-center justify-center"
+          aria-hidden="true"
+          className="relative inline-flex h-3.5 w-[18px] shrink-0 items-center"
           style={{ marginLeft: `${subagentIndentPx}px` }}
         >
-          <ProviderIcon
-            provider={thread.session?.provider ?? thread.modelSelection.provider}
-            className="size-3 shrink-0"
+          <span className="absolute left-1.5 top-0 bottom-0 w-px rounded-full bg-border/35" />
+          <span className="absolute left-1.5 top-1/2 h-px w-2.5 -translate-y-1/2 bg-border/35" />
+          <span
+            className="absolute left-1.5 top-1/2 size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{ backgroundColor: subagentPresentation?.accentColor }}
           />
         </span>
       ) : terminalEntryPoint ? (
@@ -286,6 +253,7 @@ export function SidebarThreadRowContent({
             thread.title
           )}
         </span>
+        {hasPendingDraft ? <SidebarDraftGlyph /> : null}
         {!isSubagentThread && pendingStatusColorClass ? (
           <span
             aria-label="Pending approval"

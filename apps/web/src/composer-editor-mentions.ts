@@ -70,8 +70,6 @@ const COMPOSER_SLASH_COMMAND_CHIP_NAMES = new Set<ComposerSlashCommand>([
   "automation",
   "goal",
   "computer-use",
-  "orchestration",
-  "fusion",
 ]);
 
 // While typing (composer) a URL only becomes a chip once a delimiter follows it,

@@ -1,8 +1,10 @@
 import {
+  CLAUDE_CODE_EFFORT_OPTIONS,
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_CAPABILITIES_INDEX,
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
+  OMP_THINKING_LEVEL_OPTIONS,
   type AntigravityModelOptions,
   type ClaudeApiEffort,
   type ClaudeModelOptions,
@@ -20,6 +22,8 @@ import {
   type ProviderOptionSelection,
   type PiModelOptions,
   type PiThinkingLevel,
+  type OmpModelOptions,
+  type OmpThinkingLevel,
   type ProviderKind,
   type ProviderWithDefaultModel,
 } from "@synara/contracts";
@@ -35,6 +39,7 @@ const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> =
   pi: new Set<ModelSlug>(),
   // Devin's built-in list is intentionally empty; its CLI supplies the live catalog.
   devin: new Set<ModelSlug>(),
+  omp: new Set<ModelSlug>(),
 };
 
 export interface SelectableModelOption {
@@ -42,6 +47,7 @@ export interface SelectableModelOption {
   name: string;
 }
 
+const CLAUDE_CODE_EFFORT_SET: ReadonlySet<string> = new Set(CLAUDE_CODE_EFFORT_OPTIONS);
 const PI_THINKING_LEVEL_SET = new Set<PiThinkingLevel>([
   "off",
   "minimal",
@@ -51,6 +57,7 @@ const PI_THINKING_LEVEL_SET = new Set<PiThinkingLevel>([
   "xhigh",
   "max",
 ]);
+const OMP_THINKING_LEVEL_SET = new Set<OmpThinkingLevel>(OMP_THINKING_LEVEL_OPTIONS);
 export const EMPTY_MODEL_CAPABILITIES: ModelCapabilities = {
   reasoningEffortLevels: [],
   supportsFastMode: false,
@@ -58,12 +65,17 @@ export const EMPTY_MODEL_CAPABILITIES: ModelCapabilities = {
   promptInjectedEffortLevels: [],
   contextWindowOptions: [],
 };
+
+function isClaudeCodeEffort(value: string): value is ClaudeCodeEffort {
+  return CLAUDE_CODE_EFFORT_SET.has(value);
+}
+
 export function getModelOptions(provider: ProviderKind = "codex") {
   return MODEL_OPTIONS_BY_PROVIDER[provider];
 }
 
 function hasDefaultModel(provider: ProviderKind): provider is ProviderWithDefaultModel {
-  return provider !== "pi";
+  return provider !== "pi" && provider !== "omp";
 }
 
 export function getDefaultModel(provider: "pi"): null;
@@ -266,56 +278,6 @@ export function getDevinStaticModelVariants(
   return normalizedModel ? DEVIN_STATIC_MODEL_VARIANTS[normalizedModel] : undefined;
 }
 
-// ── Devin Fusion helpers ──────────────────────────────────────────────
-
-// Devin Fusion runs a frontier "lead" model paired with a cheaper "sidekick"
-// model. The CLI encodes the whole pairing in a single model uid:
-// fusion-<lead>-<effort>[-fast]-sidekick-<sidekick>[-priority], where -fast is
-// the lead's fast tier and -priority is the sidekick's.
-export interface DevinFusionModelParts {
-  readonly lead: string;
-  readonly leadEffort: string;
-  readonly fast: boolean;
-  readonly sidekick: string;
-  readonly sidekickPriority: boolean;
-}
-
-const DEVIN_FUSION_MODEL_UID_PATTERN =
-  /^fusion-(.+)-(none|minimal|low|medium|high|xhigh|max)(-fast)?-sidekick-(.+)$/u;
-const DEVIN_FUSION_SIDEKICK_PRIORITY_SUFFIX = "-priority";
-
-export function parseDevinFusionModelUid(
-  model: string | null | undefined,
-): DevinFusionModelParts | null {
-  const trimmed = trimOrNull(model);
-  if (!trimmed) {
-    return null;
-  }
-  const match = DEVIN_FUSION_MODEL_UID_PATTERN.exec(trimmed.toLowerCase());
-  if (!match) {
-    return null;
-  }
-  const [, lead, leadEffort, fastSuffix, rawSidekick] = match;
-  if (!lead || !leadEffort || !rawSidekick) {
-    return null;
-  }
-  const sidekickPriority = rawSidekick.endsWith(DEVIN_FUSION_SIDEKICK_PRIORITY_SUFFIX);
-  const sidekick = sidekickPriority
-    ? rawSidekick.slice(0, -DEVIN_FUSION_SIDEKICK_PRIORITY_SUFFIX.length)
-    : rawSidekick;
-  return { lead, leadEffort, fast: fastSuffix === "-fast", sidekick, sidekickPriority };
-}
-
-export function composeDevinFusionModelUid(parts: {
-  readonly lead: string;
-  readonly leadEffort: string;
-  readonly fast?: boolean;
-  readonly sidekick: string;
-  readonly sidekickPriority?: boolean;
-}): string {
-  return `fusion-${parts.lead}-${parts.leadEffort}${parts.fast === true ? "-fast" : ""}-sidekick-${parts.sidekick}${parts.sidekickPriority === true ? "-priority" : ""}`;
-}
-
 export function resolveDevinModelVariant(input: {
   readonly model?: string | null | undefined;
   readonly runtimeModel?: ProviderModelDescriptor | undefined;
@@ -329,39 +291,6 @@ export function resolveDevinModelVariant(input: {
   const explicitVariant = trimOrNull(input.modelVariant) ?? undefined;
   if (!variants?.length) {
     return explicitVariant;
-  }
-  // A Fusion pairing is exact: effort/fast/sidekick are encoded in the uid, so
-  // an explicit pairing always wins over trait options. When the uid is stale
-  // (no longer advertised) it is returned unchanged so the session start can
-  // fail on the unavailable pairing instead of silently degrading to whichever
-  // pair the traits happen to match.
-  if (explicitVariant && parseDevinFusionModelUid(explicitVariant) !== null) {
-    return explicitVariant;
-  }
-
-  // A Fusion family slug carries no pairing of its own and the CLI resolves a
-  // bare `fusion` to an arbitrary pair. Pick the deterministic default instead:
-  // the medium-effort pairing on the standard sidekick when offered (what
-  // `--model fusion` lands on), otherwise the first advertised variant. A
-  // requested model that already parses as a Fusion uid returns itself —
-  // advertised or stale (stale pairings fail closed at session start). Traits
-  // never reach trait matching here: they are encoded in the uid.
-  if (variants.every((variant) => parseDevinFusionModelUid(variant.model) !== null)) {
-    const requestedModel = trimOrNull(input.model);
-    if (requestedModel !== null && parseDevinFusionModelUid(requestedModel) !== null) {
-      return requestedModel;
-    }
-    const preferred =
-      variants.find((variant) => {
-        const parts = parseDevinFusionModelUid(variant.model);
-        return (
-          parts !== null &&
-          parts.leadEffort === "medium" &&
-          !parts.fast &&
-          parts.sidekick === "swe-2-medium"
-        );
-      }) ?? variants[0];
-    return preferred?.model;
   }
 
   const reasoningEffort = trimOrNull(input.reasoningEffort);
@@ -377,12 +306,6 @@ export function resolveDevinModelVariant(input: {
   const mapsContextWindow =
     contextWindow !== null && variants.some((variant) => variant.contextWindow !== undefined);
   if (!mapsReasoningEffort && !mapsFastMode && !mapsThinking && !mapsContextWindow) {
-    // A requested model that is itself a concrete advertised variant (a
-    // variant uid typed as the model slug) resolves to itself.
-    const requestedModel = trimOrNull(input.model);
-    if (requestedModel !== null && variants.some((variant) => variant.model === requestedModel)) {
-      return requestedModel;
-    }
     return explicitVariant;
   }
 
@@ -565,7 +488,7 @@ function reasoningDescriptorId(provider: ProviderKind): string {
   if (provider === "opencode") {
     return "variant";
   }
-  if (provider === "pi") {
+  if (provider === "pi" || provider === "omp") {
     return "thinkingLevel";
   }
   return "reasoningEffort";
@@ -815,10 +738,7 @@ export function normalizeModelSlug(
   const providerScopedModel =
     provider === "claudeAgent"
       ? stripClaudeContextWindowSuffix(trimmed)
-      : provider === "devin" &&
-          trimmed === trimmed.toLowerCase() &&
-          trimmed.endsWith("-medium") &&
-          !trimmed.startsWith("fusion-")
+      : provider === "devin" && trimmed === trimmed.toLowerCase() && trimmed.endsWith("-medium")
         ? trimmed.slice(0, -"-medium".length)
         : trimmed;
   const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
@@ -864,7 +784,25 @@ export function resolveSelectableModel(
   }
 
   const resolved = options.find((option) => option.slug === normalized);
-  return resolved ? resolved.slug : null;
+  if (resolved) {
+    return resolved.slug;
+  }
+
+  // Scoped providers (omp/pi/opencode) surface catalog slugs as
+  // `<upstream-provider>/<model>`, while saved selections and custom entries
+  // can hold the bare model id. Resolve a bare slug to a uniquely matching
+  // scoped option; ambiguity across upstream providers resolves to nothing.
+  if (
+    (provider === "omp" || provider === "pi" || provider === "opencode") &&
+    !normalized.includes("/")
+  ) {
+    const scoped = options.filter((option) => option.slug.endsWith(`/${normalized}`));
+    if (scoped.length === 1) {
+      return scoped[0]!.slug;
+    }
+  }
+
+  return null;
 }
 
 export function resolveModelSlug(
@@ -876,7 +814,7 @@ export function resolveModelSlug(
     provider === "claudeAgent" && normalizedModel
       ? (stripClaudeContextWindowSuffix(normalizedModel) as ModelSlug)
       : normalizedModel;
-  if (provider === "devin" || provider === "pi") {
+  if (provider === "devin" || provider === "pi" || provider === "omp") {
     return normalized;
   }
   if (!normalized) {
@@ -978,7 +916,10 @@ interface ClaudeSpawnProfile {
 function claudeSpawnProfile(selection: Extract<ModelSelection, { provider: "claudeAgent" }>) {
   const caps = getModelCapabilities("claudeAgent", selection.model);
   const requestedEffort = trimOrNull(selection.options?.effort ?? null);
-  const effort = requestedEffort && hasEffortLevel(caps, requestedEffort) ? requestedEffort : null;
+  const effort =
+    requestedEffort && isClaudeCodeEffort(requestedEffort) && hasEffortLevel(caps, requestedEffort)
+      ? requestedEffort
+      : null;
   return {
     maxEffort: getEffectiveClaudeCodeEffort(effort) === "max",
     autoCompactWindow: normalizeClaudeModelOptions(selection.model, selection.options)
@@ -1085,6 +1026,14 @@ export function normalizePiModelOptions(
   const thinkingLevel = trimOrNull(modelOptions?.thinkingLevel);
   return thinkingLevel && PI_THINKING_LEVEL_SET.has(thinkingLevel as PiThinkingLevel)
     ? { thinkingLevel: thinkingLevel as PiThinkingLevel }
+    : undefined;
+}
+export function normalizeOmpModelOptions(
+  modelOptions: OmpModelOptions | null | undefined,
+): OmpModelOptions | undefined {
+  const thinkingLevel = trimOrNull(modelOptions?.thinkingLevel);
+  return thinkingLevel && OMP_THINKING_LEVEL_SET.has(thinkingLevel as OmpThinkingLevel)
+    ? { thinkingLevel: thinkingLevel as OmpThinkingLevel }
     : undefined;
 }
 

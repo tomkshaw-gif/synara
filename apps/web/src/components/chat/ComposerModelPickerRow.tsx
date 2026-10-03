@@ -4,14 +4,8 @@
 // Layer: Chat composer presentation
 // Depends on: composer trait resolution, starred model keys, and shared menu primitives.
 
-import { type DevinModelOptions, type ProviderModelDescriptor } from "@synara/contracts";
+import { type ProviderModelDescriptor } from "@synara/contracts";
 
-import {
-  buildDevinFusionCatalog,
-  devinFusionChoiceFromUid,
-  devinFusionUidForChoice,
-  resolveDevinFusionChoice,
-} from "~/lib/devinFusion";
 import { type StarredModel, starredModelSlotKey } from "~/lib/starredModels";
 import { cn } from "~/lib/utils";
 import { type ProviderOptions } from "../../providerModelOptions";
@@ -54,48 +48,25 @@ export function ComposerModelPickerRow(props: {
   /** Null hides the hover effort side block (the picker's footer slider owns effort). */
   onSelectEffort: ((row: PickerRow, effort: string) => void) | null;
   onToggleStar: (entry: StarredModel) => void;
-  onUnstarModel: (entry: Pick<StarredModel, "provider" | "model">) => void;
+  onUnstarModel: (entry: Pick<StarredModel, "provider" | "instanceId" | "model">) => void;
 }) {
   const { row } = props;
-  const runtimeModel = resolveRuntimeModelDescriptor({
-    provider: row.provider,
-    model: row.model,
-    runtimeModels: props.runtimeModels,
-  });
   const selection = getComposerTraitSelection(
     row.provider,
     row.model,
     props.prompt,
     props.providerOptions,
-    runtimeModel,
+    resolveRuntimeModelDescriptor({
+      provider: row.provider,
+      model: row.model,
+      runtimeModels: props.runtimeModels,
+    }),
   );
-  // Fusion rows compose their pairing in the footer; a bare effort submenu would
-  // fight the uid, and a star pins the resolved pairing uid.
-  const fusionCatalog =
-    row.provider === "devin" ? buildDevinFusionCatalog(runtimeModel?.modelVariants) : null;
-  const fusionVariant =
-    fusionCatalog !== null
-      ? (() => {
-          const choice = resolveDevinFusionChoice(
-            fusionCatalog,
-            devinFusionChoiceFromUid(
-              (props.providerOptions as DevinModelOptions | undefined)?.modelVariant,
-            ),
-          );
-          return choice !== null ? devinFusionUidForChoice(choice) : null;
-        })()
-      : null;
   const starEntry: StarredModel = row.preset ?? {
     provider: row.provider,
+    ...(row.instanceId ? { instanceId: row.instanceId } : {}),
     model: row.model,
-    // A Fusion preset pins its pairing uid only; generic traits are encoded in
-    // the uid and pinning them separately would fight the pairing.
-    ...resolveStarredTraits(
-      fusionCatalog !== null
-        ? { ...selection, effortLevels: [], fastModeDescriptor: null, thinkingEnabled: null }
-        : selection,
-      { modelVariant: fusionVariant },
-    ),
+    ...resolveStarredTraits(selection),
   };
   // Provider rows ignore the pinned traits: the provider's current traits are shared by
   // all of its models, so matching them would hide the star of every other preset.
@@ -103,10 +74,7 @@ export function ComposerModelPickerRow(props: {
   // Starred rows already pin their effort; Ultrathink locks the ladder to the prompt.
   const onSelectEffort = props.onSelectEffort;
   const effortLevels =
-    onSelectEffort !== null &&
-    row.preset === null &&
-    !selection.ultrathinkPromptControlled &&
-    fusionCatalog === null
+    onSelectEffort !== null && row.preset === null && !selection.ultrathinkPromptControlled
       ? selection.effortLevels
       : [];
   const RowProviderIcon = PROVIDER_ICON_COMPONENT_BY_PROVIDER[row.provider];

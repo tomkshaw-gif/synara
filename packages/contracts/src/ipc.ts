@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 import type {
+  LoadProjectImportHistoryInput,
+  LoadProjectImportHistoryResult,
   ImportProjectInput,
   ImportProjectResult,
   ListProjectImportsInput,
@@ -47,6 +49,67 @@ import type {
   AutomationStreamEvent,
   AutomationUpdateInput,
 } from "./automation";
+import type {
+  Todo,
+  TodoCreateInput,
+  TodoDeleteInput,
+  TodoListResult,
+  TodoStreamEvent,
+  TodoUpdateInput,
+} from "./todo";
+import type {
+  ProjectAgentConfigureInput,
+  ProjectAgentLinkProjectInput,
+  ProjectAgentUnlinkProjectInput,
+  ProjectAgentExportDocumentsInput,
+  ProjectAgentExportDocumentsResult,
+  ProjectAgentGetOverviewInput,
+  ProjectAgentDeleteGroupInput,
+  ProjectAgentGroupControlInput,
+  ProjectAgentDeleteGroupResult,
+  ProjectAgentListSummariesInput,
+  ProjectAgentListSummariesResult,
+  ProjectAgentGoalControlInput,
+  ProjectAgentListActivityInput,
+  ProjectAgentListActivityResult,
+  ProjectAgentListDocumentsInput,
+  ProjectAgentListDocumentsResult,
+  ProjectAgentListTasksInput,
+  ProjectAgentListTasksResult,
+  ProjectAgentOverview,
+  ProjectAgentReadDocumentInput,
+  ProjectAgentReadDocumentResult,
+  ProjectAgentRefreshDigestInput,
+  ProjectAgentStartGoalInput,
+  ProjectAgentStreamEvent,
+  ProjectAgentUpdateGoalInput,
+  ProjectAgentUpdateTaskInput,
+  ProjectAgentWriteDocumentInput,
+  ProjectAgentCreateTaskInput,
+  ProjectAgentExcludeThreadInput,
+  ProjectAgentBackfillInput,
+  ProjectAgentListThreadIndexInput,
+  ProjectAgentListThreadIndexResult,
+  ProjectAgentListEvidenceInput,
+  ProjectAgentListEvidenceResult,
+  ProjectAgentLibraryDeleteInput,
+  ProjectAgentLibraryHistoryInput,
+  ProjectAgentLibraryHistoryResult,
+  ProjectAgentLibraryListInput,
+  ProjectAgentLibraryListResult,
+  ProjectAgentLibraryMkdirInput,
+  ProjectAgentLibraryMutationResult,
+  ProjectAgentLibraryRenameInput,
+  ProjectAgentLibraryRestoreInput,
+  ProjectAgentLibraryStatusInput,
+  ProjectAgentLibraryStatusResult,
+  ProjectAgentResolveWorkerInput,
+  ProjectAgentResolveWorkerResult,
+  ProjectDocumentRevision,
+  ProjectGoal,
+  ProjectTask,
+  ProjectThreadIndexEntry,
+} from "./projectAgent";
 import type {
   GitCheckoutInput,
   GitActionProgressEvent,
@@ -109,13 +172,17 @@ import type {
   PullRequestDetail,
   PullRequestDetailInput,
   PullRequestDiffResult,
-  PullRequestReviewRequestCountInput,
-  PullRequestReviewRequestCountResult,
   PullRequestSetPinnedInput,
   PullRequestSetPinnedResult,
-  PullRequestsListInput,
-  PullRequestsListResult,
 } from "./pullRequests";
+import type {
+  GitHubInboxListInput,
+  GitHubInboxListResult,
+  GitHubIssueCommentInput,
+  GitHubIssueCommentResult,
+  GitHubIssueDetail,
+  GitHubIssueDetailInput,
+} from "./githubInbox";
 import type {
   ProjectCreateLocalFilePreviewGrantInput,
   ProjectCreateLocalFilePreviewGrantResult,
@@ -228,6 +295,8 @@ import type {
   ServerStopLocalServerResult,
   ServerUpdateSettingsInput,
   ServerUpdateSettingsResult,
+  ServerEditKeybindingsInput,
+  ServerEditKeybindingsResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
   ServerVoicePrewarmInput,
@@ -298,6 +367,8 @@ import type {
   StatsGetProfileStatsResult,
   StatsGetProfileTokenStatsInput,
   StatsGetProfileTokenStatsResult,
+  StatsGetRecapInput,
+  StatsGetRecapResult,
 } from "./stats";
 import type { BrowserAnnotationMethods } from "./browserAnnotations";
 
@@ -309,10 +380,12 @@ export interface ContextMenuItem<T extends string = string> {
   destructive?: boolean;
   /** Central icon basename from the reversed set (e.g. `"pencil"`) or inline `<svg>` markup. */
   icon?: string;
-  /** Nested rows shown in a flyout submenu (supported one level deep). */
+  /**
+   * Opens a submenu instead of resolving this row. Related actions (handoff targets, copy
+   * variants, fork targets) belong in one parent row rather than a flat run of siblings.
+   * Only leaf ids are ever returned; the parent `id` just identifies the group.
+   */
   children?: readonly ContextMenuItem<T>[];
-  /** Renders a check/radio marker for the currently active choice. */
-  checked?: boolean;
 }
 
 /** Context menu row sent over the desktop bridge with its icon pre-rasterized by the renderer. */
@@ -335,6 +408,20 @@ export type DesktopUpdateStatus =
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
 
+/** Largest desktop blur radius the translucent window shell accepts, in points. */
+export const DESKTOP_WINDOW_BLUR_RADIUS_MAX = 64;
+/** Smallest one: an unblurred desktop behind a clear window reads as a hole, not as glass. */
+export const DESKTOP_WINDOW_BLUR_RADIUS_MIN = 1;
+
+/**
+ * Window backing the renderer asks for. `translucent` removes macOS vibrancy and sets the
+ * desktop blur to `blurRadius`; `opaque` restores vibrancy and ignores `blurRadius`.
+ */
+export interface DesktopWindowMaterial {
+  material: "opaque" | "translucent";
+  blurRadius: number;
+}
+
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
   appArch: DesktopRuntimeArch;
@@ -356,6 +443,9 @@ export interface DesktopUpdateState {
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
   installFailureCount: number;
+  // Build flavor of the running desktop app ("production" | "beta" | "canary" | "cua").
+  // The web UI uses it for beta-only branding; production builds never see it.
+  flavor: "production" | "beta" | "canary" | "cua";
   // Public URL where the user can manually download the release when the
   // in-app updater cannot apply it (silent installer failure, unsigned build,
   // read-only install location, unsupported platform). Null when no GitHub
@@ -367,6 +457,55 @@ export interface DesktopUpdateActionResult {
   accepted: boolean;
   completed: boolean;
   state: DesktopUpdateState;
+}
+
+/** In-flight or failed beta download/install reported by the stable side. */
+export interface DesktopBetaInstallProgress {
+  readonly phase: "downloading" | "verifying" | "installing" | "opening" | "error";
+  /** 0-100 while the download reports a content length; null when indeterminate. */
+  readonly percent: number | null;
+  readonly message?: string;
+}
+
+/** Result of a stable-side probe for a parallel Synara Beta install. */
+export interface DesktopBetaChannelState {
+  /** False on web builds and unsupported probing environments. */
+  readonly supported: boolean;
+  /** Flavor of the running desktop app; the card only acts on "production". */
+  readonly flavor: "production" | "beta" | "canary" | "cua";
+  readonly installed: boolean;
+  readonly version: string | null;
+  /** True when this platform can install beta in place (macOS today). */
+  readonly canInstall: boolean;
+  /** Beta's server pid is alive (its launch marker/runtime file says so). */
+  readonly running: boolean;
+  /** Timestamp of the last completed data import reported by the beta app. */
+  readonly lastImportAt: string | null;
+  readonly lastImportError: string | null;
+  /** Public download page handed to the user when beta is not installed. */
+  readonly downloadUrl: string;
+  /** Live download/install progress; an `error` phase stays until the next attempt. */
+  readonly install: DesktopBetaInstallProgress | null;
+  /** Beta only: a stable Synara app was found to switch back to. */
+  readonly stableInstalled: boolean;
+  /** Beta only: leaving can also move the beta app to the Trash (macOS). */
+  readonly canMoveBetaToTrash: boolean;
+  /** Stable download page offered from beta when stable is not installed. */
+  readonly stableDownloadUrl: string;
+}
+
+export type DesktopBetaActionError =
+  | "not-supported"
+  | "not-installed"
+  | "beta-running"
+  | "install-failed"
+  | "launch-failed"
+  | "internal";
+
+export interface DesktopBetaActionResult {
+  readonly ok: boolean;
+  readonly error?: DesktopBetaActionError;
+  readonly message?: string;
 }
 
 export interface BrowserTabState {
@@ -641,7 +780,7 @@ export interface DesktopCustomTitleBarState {
   restartRequired: boolean;
 }
 
-export const DesktopAppIcon = Schema.Literals(["default", "icon", "dark"]);
+export const DesktopAppIcon = Schema.Literals(["default", "icon", "dark", "beta"]);
 export type DesktopAppIcon = typeof DesktopAppIcon.Type;
 
 export interface SynaraStorageSnapshot {
@@ -666,6 +805,17 @@ export interface DesktopComputerPreviewFrame {
   readonly jpeg: Uint8Array;
 }
 
+/** Sound the message trail follows: the Mac's audio output, the microphone, or both. */
+export type DesktopAudioLevelSource = "system" | "microphone" | "both";
+
+/**
+ * Whether the desktop is reading audio levels. "unsupported" means this host
+ * can never provide them (not macOS); "unavailable" means
+ * the reader failed, for example on macOS before 14.2 or without microphone
+ * access.
+ */
+export type DesktopAudioLevelStatus = "active" | "off" | "unsupported" | "unavailable";
+
 /**
  * Agent cursor colors mirrored from the renderer to the desktop main process.
  * Each channel is a `#rrggbb` string; an omitted channel keeps the driver's
@@ -677,7 +827,21 @@ export interface DesktopAgentCursorStyle {
   readonly shadow?: string;
 }
 
+export const DESKTOP_RENDERER_ERROR_MESSAGE_MAX_LENGTH = 1024;
+export const DESKTOP_RENDERER_ERROR_STACK_MAX_LENGTH = 8 * 1024;
+
+/** Fixed, bounded exception fields accepted by Beta's diagnostics IPC. */
+export interface DesktopRendererError {
+  readonly message: string;
+  readonly stack?: string | undefined;
+}
+
 export interface DesktopBridge {
+  /** Present only when the desktop main process enables baked-in Beta diagnostics. */
+  betaDiagnostics?: {
+    rendererReady: () => void;
+    reportError: (error: DesktopRendererError) => void;
+  };
   safariAccess?: {
     getInfo: () => Promise<DesktopSafariAccessInfo>;
     openSettings: () => Promise<boolean>;
@@ -697,6 +861,8 @@ export interface DesktopBridge {
   }) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  /** macOS only; resolves false when the adjustable blur is unavailable. */
+  setWindowMaterial?: (input: DesktopWindowMaterial) => Promise<boolean>;
   getAppIcon?: () => Promise<DesktopAppIcon>;
   setAppIcon: (icon: DesktopAppIcon) => Promise<void>;
   showContextMenu: <T extends string>(
@@ -745,6 +911,16 @@ export interface DesktopBridge {
   computer?: {
     setCursorStyle: (style: DesktopAgentCursorStyle | null) => Promise<void>;
   };
+  /**
+   * Loudness of the Mac's audio output and/or the microphone, in 0..1, for the
+   * message trail. Desktop on macOS only, in Stable and Beta; the main process
+   * refuses it elsewhere. Levels stream only while this window has a source set
+   * (`null` stops), and silence arrives once as 0.
+   */
+  audioLevel?: {
+    setSource: (source: DesktopAudioLevelSource | null) => Promise<DesktopAudioLevelStatus>;
+    onLevel: (listener: (level: number) => void) => () => void;
+  };
   onMenuAction: (listener: (action: string) => void) => () => void;
   onQuitConfirmationRequest: (
     listener: (request: DesktopQuitConfirmationRequest) => void,
@@ -758,6 +934,23 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  /** Stable→Beta opt-in surface. Absent on builds that do not ship it. */
+  beta?: {
+    getState: () => Promise<DesktopBetaChannelState>;
+    /** Downloads and installs Synara Beta when missing (macOS), then opens it. */
+    install: () => Promise<DesktopBetaActionResult>;
+    /**
+     * Installs Synara Beta when missing (macOS), writes the import marker, and
+     * launches it to consume the import.
+     */
+    importAndLaunch: () => Promise<DesktopBetaActionResult>;
+    launch: () => Promise<DesktopBetaActionResult>;
+    /**
+     * Beta only: opens stable Synara, optionally moves the beta app to the
+     * Trash (macOS), then quits beta. Beta data stays in the beta home.
+     */
+    leave: (input: { readonly moveToTrash: boolean }) => Promise<DesktopBetaActionResult>;
+  };
   notifications: {
     isSupported: () => Promise<boolean>;
     show: (input: DesktopNotificationInput) => Promise<boolean>;
@@ -937,11 +1130,12 @@ export interface NativeApi {
       callback: (event: GitWorktreeSetupProgressEvent) => void,
     ) => () => void;
   };
+  githubInbox: {
+    list: (input: GitHubInboxListInput) => Promise<GitHubInboxListResult>;
+    issueDetail: (input: GitHubIssueDetailInput) => Promise<GitHubIssueDetail>;
+    issueComment: (input: GitHubIssueCommentInput) => Promise<GitHubIssueCommentResult>;
+  };
   pullRequests: {
-    list: (input: PullRequestsListInput) => Promise<PullRequestsListResult>;
-    reviewRequestCount: (
-      input: PullRequestReviewRequestCountInput,
-    ) => Promise<PullRequestReviewRequestCountResult>;
     detail: (input: PullRequestDetailInput) => Promise<PullRequestDetail>;
     diff: (input: PullRequestDetailInput) => Promise<PullRequestDiffResult>;
     action: (input: PullRequestActionInput) => Promise<PullRequestActionResult>;
@@ -1011,12 +1205,14 @@ export interface NativeApi {
       input: ServerVoiceTranscriptionInput,
     ) => Promise<ServerVoiceTranscriptionResult>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+    editKeybindings: (input: ServerEditKeybindingsInput) => Promise<ServerEditKeybindingsResult>;
   };
   stats: {
     getProfileStats: (input: StatsGetProfileStatsInput) => Promise<StatsGetProfileStatsResult>;
     getProfileTokenStats: (
       input: StatsGetProfileTokenStatsInput,
     ) => Promise<StatsGetProfileTokenStatsResult>;
+    getRecap: (input: StatsGetRecapInput) => Promise<StatsGetRecapResult>;
   };
   provider: {
     getComposerCapabilities: (
@@ -1043,6 +1239,9 @@ export interface NativeApi {
     ) => Promise<OrchestrationImportThreadResult>;
     listProjectImports: (input: ListProjectImportsInput) => Promise<ListProjectImportsResult>;
     importProject: (input: ImportProjectInput) => Promise<ImportProjectResult>;
+    loadProjectImportHistory: (
+      input: LoadProjectImportHistoryInput,
+    ) => Promise<LoadProjectImportHistoryResult>;
     regenerateThreadTitle: (
       input: OrchestrationRegenerateThreadTitleInput,
     ) => Promise<OrchestrationRegenerateThreadTitleResult>;
@@ -1072,6 +1271,64 @@ export interface NativeApi {
     onShellEvent: (callback: (event: OrchestrationShellStreamItem) => void) => () => void;
     onThreadEvent: (callback: (event: OrchestrationThreadStreamItem) => void) => () => void;
   };
+  projectAgent: {
+    getOverview: (input: ProjectAgentGetOverviewInput) => Promise<ProjectAgentOverview>;
+    listSummaries: (
+      input?: ProjectAgentListSummariesInput,
+    ) => Promise<ProjectAgentListSummariesResult>;
+    configure: (input: ProjectAgentConfigureInput) => Promise<ProjectAgentOverview>;
+    linkProject: (input: ProjectAgentLinkProjectInput) => Promise<ProjectAgentOverview>;
+    unlinkProject: (input: ProjectAgentUnlinkProjectInput) => Promise<ProjectAgentOverview>;
+    startGoal: (input: ProjectAgentStartGoalInput) => Promise<ProjectGoal>;
+    updateGoal: (input: ProjectAgentUpdateGoalInput) => Promise<ProjectGoal>;
+    pauseGoal: (input: ProjectAgentGoalControlInput) => Promise<ProjectGoal>;
+    resumeGoal: (input: ProjectAgentGoalControlInput) => Promise<ProjectGoal>;
+    stopGoal: (input: ProjectAgentGoalControlInput) => Promise<ProjectGoal>;
+    listTasks: (input: ProjectAgentListTasksInput) => Promise<ProjectAgentListTasksResult>;
+    createTask: (input: ProjectAgentCreateTaskInput) => Promise<ProjectTask>;
+    updateTask: (input: ProjectAgentUpdateTaskInput) => Promise<ProjectTask>;
+    listEvidence: (input: ProjectAgentListEvidenceInput) => Promise<ProjectAgentListEvidenceResult>;
+    listThreadIndex: (
+      input: ProjectAgentListThreadIndexInput,
+    ) => Promise<ProjectAgentListThreadIndexResult>;
+    excludeThread: (input: ProjectAgentExcludeThreadInput) => Promise<ProjectThreadIndexEntry>;
+    backfillSummaries: (input: ProjectAgentBackfillInput) => Promise<ProjectAgentOverview>;
+    listActivity: (input: ProjectAgentListActivityInput) => Promise<ProjectAgentListActivityResult>;
+    listDocuments: (
+      input: ProjectAgentListDocumentsInput,
+    ) => Promise<ProjectAgentListDocumentsResult>;
+    readDocument: (input: ProjectAgentReadDocumentInput) => Promise<ProjectAgentReadDocumentResult>;
+    writeDocument: (input: ProjectAgentWriteDocumentInput) => Promise<ProjectDocumentRevision>;
+    exportDocuments: (
+      input: ProjectAgentExportDocumentsInput,
+    ) => Promise<ProjectAgentExportDocumentsResult>;
+    refreshDigest: (input: ProjectAgentRefreshDigestInput) => Promise<ProjectAgentOverview>;
+    pauseGroup: (input: ProjectAgentGroupControlInput) => Promise<ProjectAgentOverview>;
+    resumeGroup: (input: ProjectAgentGroupControlInput) => Promise<ProjectAgentOverview>;
+    archiveGroup: (input: ProjectAgentGroupControlInput) => Promise<ProjectAgentOverview>;
+    unarchiveGroup: (input: ProjectAgentGroupControlInput) => Promise<ProjectAgentOverview>;
+    restartCoordinator: (input: ProjectAgentGroupControlInput) => Promise<ProjectAgentOverview>;
+    deleteGroup: (input: ProjectAgentDeleteGroupInput) => Promise<ProjectAgentDeleteGroupResult>;
+    resolveWorker: (
+      input: ProjectAgentResolveWorkerInput,
+    ) => Promise<ProjectAgentResolveWorkerResult>;
+    library: {
+      list: (input: ProjectAgentLibraryListInput) => Promise<ProjectAgentLibraryListResult>;
+      mkdir: (input: ProjectAgentLibraryMkdirInput) => Promise<ProjectAgentLibraryMutationResult>;
+      rename: (input: ProjectAgentLibraryRenameInput) => Promise<ProjectAgentLibraryMutationResult>;
+      delete: (input: ProjectAgentLibraryDeleteInput) => Promise<ProjectAgentLibraryMutationResult>;
+      history: (
+        input: ProjectAgentLibraryHistoryInput,
+      ) => Promise<ProjectAgentLibraryHistoryResult>;
+      restore: (
+        input: ProjectAgentLibraryRestoreInput,
+      ) => Promise<ProjectAgentLibraryMutationResult>;
+      status: (input: ProjectAgentLibraryStatusInput) => Promise<ProjectAgentLibraryStatusResult>;
+    };
+    subscribe: (input: { projectId: string }) => Promise<void>;
+    unsubscribe: (input: { projectId: string }) => Promise<void>;
+    onEvent: (callback: (event: ProjectAgentStreamEvent) => void) => () => void;
+  };
   automation: {
     list: (input?: AutomationListInput) => Promise<AutomationListResult>;
     getMemory: (input: AutomationGetMemoryInput) => Promise<AutomationMemory | null>;
@@ -1086,6 +1343,13 @@ export interface NativeApi {
       input: AutomationResolveProposalInput,
     ) => Promise<AutomationResolveProposalResult>;
     onEvent: (callback: (event: AutomationStreamEvent) => void) => () => void;
+  };
+  todo: {
+    list: () => Promise<TodoListResult>;
+    create: (input: TodoCreateInput) => Promise<Todo>;
+    update: (input: TodoUpdateInput) => Promise<Todo>;
+    delete: (input: TodoDeleteInput) => Promise<void>;
+    onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
   };
   browser: BrowserControlMethods & {
     annotations: BrowserAnnotationMethods;

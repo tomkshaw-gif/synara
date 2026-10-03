@@ -6,6 +6,7 @@
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@synara/contracts";
 import type {
   GitActionProgressEvent,
+  GitActionProgressPhase,
   GitRunStackedActionResult,
   GitStackedAction,
   GitStatusResult,
@@ -18,6 +19,7 @@ import { ChevronDownIcon, InfoIcon } from "~/lib/icons";
 import { Input } from "~/components/ui/input";
 import {
   buildGitActionProgressStages,
+  buildGitActionFailureToast,
   buildMenuItems,
   type GitDialogContext,
   type GitActionMenuItem,
@@ -52,6 +54,7 @@ import { formatClockDuration } from "~/session-logic";
 import { Button } from "~/components/ui/button";
 import {
   ChatHeaderButton,
+  ChatHeaderIconButton,
   ChatHeaderSplitDivider,
   ChatHeaderSplitGroup,
   CHAT_HEADER_CONTROL_CLASS_NAME,
@@ -143,6 +146,8 @@ interface ActiveGitActionProgress {
   hookName: string | null;
   lastOutputLine: string | null;
   currentPhaseLabel: string | null;
+  phase: GitActionProgressPhase | null;
+  failure?: Extract<GitActionProgressEvent, { kind: "action_failed" }>;
 }
 
 interface RunGitActionWithToastInput {
@@ -256,13 +261,26 @@ export default function GitActionsControl({
   const createBranchNameFieldId = useId();
   const { settings } = useAppSettings();
   // Manual memoization kept: this file does not compile under React Compiler (see compile-report).
-  const providerOptions = useMemo(() => getProviderStartOptions(settings), [settings]);
+  const providerOptions = useMemo(
+    () =>
+      getProviderStartOptions(
+        settings,
+        settings.textGenerationProviderInstanceId ?? settings.textGenerationProvider ?? "codex",
+      ),
+    [settings],
+  );
   const gitTextGenerationModelSelection = useMemo(
     (): ModelSelection => ({
       provider: settings.textGenerationProvider ?? "codex",
+      instanceId:
+        settings.textGenerationProviderInstanceId ?? settings.textGenerationProvider ?? "codex",
       model: settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL,
     }),
-    [settings.textGenerationModel, settings.textGenerationProvider],
+    [
+      settings.textGenerationModel,
+      settings.textGenerationProvider,
+      settings.textGenerationProviderInstanceId,
+    ],
   );
   // Shell-only slice: the full derived Thread gets a new reference on every
   // streamed delta, which re-rendered this always-mounted control per token.
@@ -491,6 +509,7 @@ export default function GitActionsControl({
           progress.lastOutputLine = null;
           break;
         case "phase_started":
+          progress.phase = event.phase;
           progress.title = event.label;
           progress.currentPhaseLabel = event.label;
           progress.phaseStartedAtMs = now;
@@ -518,8 +537,7 @@ export default function GitActionsControl({
           // Its server-side status refresh is detached, keeping this event-to-response gap short.
           return;
         case "action_failed":
-          // Same reasoning as action_finished — let the HTTP error handler
-          // manage the final toast state to avoid a flash of bare title.
+          progress.failure = event;
           return;
       }
 
@@ -763,7 +781,7 @@ export default function GitActionsControl({
           data: threadToastData,
         });
 
-      activeGitActionProgressRef.current = {
+      const actionProgress: ActiveGitActionProgress = {
         toastId: resolvedProgressToastId,
         actionId,
         title: progressStages[0] ?? "Running git action...",
@@ -772,7 +790,9 @@ export default function GitActionsControl({
         hookName: null,
         lastOutputLine: null,
         currentPhaseLabel: progressStages[0] ?? "Running git action...",
+        phase: null,
       };
+      activeGitActionProgressRef.current = actionProgress;
 
       if (progressToastId) {
         toastManager.update(progressToastId, {
@@ -798,7 +818,9 @@ export default function GitActionsControl({
 
       try {
         const result = await promise;
-        activeGitActionProgressRef.current = null;
+        if (activeGitActionProgressRef.current === actionProgress) {
+          activeGitActionProgressRef.current = null;
+        }
         const resultToast = summarizeGitResult(result);
         const persistedPr =
           result.pr.status === "created" || result.pr.status === "opened_existing"
@@ -915,16 +937,23 @@ export default function GitActionsControl({
         });
         afterSuccess?.(result);
       } catch (err) {
-        activeGitActionProgressRef.current = null;
-        toastManager.update(resolvedProgressToastId, {
-          type: "error",
-          title: "Action failed",
-          description: err instanceof Error ? err.message : "An error occurred.",
-          data: threadToastData,
-        });
+        if (activeGitActionProgressRef.current === actionProgress) {
+          activeGitActionProgressRef.current = null;
+        }
+        toastManager.update(
+          resolvedProgressToastId,
+          buildGitActionFailureToast({
+            message:
+              actionProgress.failure?.message ??
+              (err instanceof Error ? err.message : "An error occurred."),
+            phase: actionProgress.failure?.phase ?? actionProgress.phase,
+            threadId: activeThreadId,
+          }),
+        );
       }
     },
     [
+      activeThreadId,
       defaultBranchName,
       gitStatusForActions,
       hasOriginRemote,
@@ -1452,6 +1481,20 @@ export default function GitActionsControl({
     if (!promotedPull) return null;
     // Pull-only chrome: Environment already owns commit/push/PR dialogs, so this
     // instance must not mount a second copy of them beside the panel control.
+    if (hideQuickActionLabel) {
+      return (
+        <ChatHeaderIconButton
+          type="button"
+          tone="surface"
+          label={promotedPull.label}
+          title={promotedPull.label}
+          disabled={isGitActionRunning}
+          onClick={runSyncWithRemote}
+        >
+          <GitActionGlyph name="sync" />
+        </ChatHeaderIconButton>
+      );
+    }
     return (
       <ChatHeaderButton
         type="button"

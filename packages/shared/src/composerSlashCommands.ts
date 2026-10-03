@@ -5,8 +5,6 @@
 // Exports: command-name constants and normalization helpers.
 
 import { COMPUTER_USE_SLASH_COMMAND } from "./computerInvocation";
-import { FUSION_SLASH_COMMAND } from "./fusionInvocation";
-import { ORCHESTRATION_SLASH_COMMAND } from "./orchestrationInvocation";
 
 export const BUILT_IN_COMPOSER_SLASH_COMMANDS = [
   "clear",
@@ -20,8 +18,6 @@ export const BUILT_IN_COMPOSER_SLASH_COMMANDS = [
   "side",
   "status",
   "subagents",
-  ORCHESTRATION_SLASH_COMMAND,
-  FUSION_SLASH_COMMAND,
   COMPUTER_USE_SLASH_COMMAND,
   "fast",
   "export",

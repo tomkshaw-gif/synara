@@ -4,7 +4,7 @@
 
 import type { ProjectId, ThreadEnvironmentMode, ThreadId } from "@synara/contracts";
 import { isAutomationRunThread } from "@synara/shared/automationMode";
-import { isFusionSidekickRole } from "@synara/shared/fusionInvocation";
+import { isSidechatThread, sidechatContextMatchesGitHubItem } from "@synara/shared/sidechatThread";
 
 import type { AppState } from "./storeState";
 import { ACCOUNT_RATE_LIMIT_ACTIVITY_KINDS } from "./lib/rateLimits";
@@ -232,6 +232,40 @@ export function createAllThreadsMessagelessSelector(): (state: AppState) => bool
   };
 }
 
+/** A thread's shell without `updatedAt`, the one field every streamed delta rewrites. */
+export type ThreadShellSettings = Omit<ThreadShell, "updatedAt">;
+
+function threadShellSettingsEqual(left: ThreadShell, right: ThreadShell): boolean {
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (key !== "updatedAt" && left[key as keyof ThreadShell] !== right[key as keyof ThreadShell]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** One thread's shell for subscribers that act on its settings (project, model, modes,
+ *  workspace) and must not re-render while it streams: the result keeps its identity until
+ *  a field other than `updatedAt` changes. */
+export function createThreadShellSettingsSelector(
+  threadId: ThreadId | null | undefined,
+): (state: AppState) => ThreadShellSettings | undefined {
+  let previousSource: ThreadShell | undefined;
+  let previousResult: ThreadShell | undefined;
+
+  return (state) => {
+    const source = threadId ? state.threadShellById?.[threadId] : undefined;
+    if (source === previousSource) {
+      return previousResult;
+    }
+    previousSource = source;
+    if (!source || !previousResult || !threadShellSettingsEqual(source, previousResult)) {
+      previousResult = source;
+    }
+    return previousResult;
+  };
+}
+
 export function createThreadProjectIdSelector(
   threadId: ThreadId | null | undefined,
 ): (state: AppState) => ProjectId | null {
@@ -386,7 +420,7 @@ export function createComposerThreadMentionSourcesSelector(): (
 
     const nextSources = (threadIds ?? []).flatMap((threadId) => {
       const thread = summaryById[threadId];
-      return thread && !thread.sidechatSourceThreadId && !isFusionSidekickRole(thread.subagentRole)
+      return thread && !isSidechatThread(thread)
         ? [
             {
               id: thread.id,
@@ -440,23 +474,16 @@ export function isSidebarThreadVisible(
   thread: SidebarThreadSummary,
   options?: SidebarThreadVisibilityOptions,
 ): boolean {
-  if (thread.sidechatSourceThreadId) return false;
-  // A fusion sidekick is the lead's hidden worker. Show it only while it is
-  // blocked on an approval or a question, so that wait has a row to open.
-  if (
-    isFusionSidekickRole(thread.subagentRole) &&
-    thread.hasPendingApprovals !== true &&
-    thread.hasPendingUserInput !== true
-  ) {
-    return false;
-  }
+  // Sidechats live in their host's dock (a thread's, or the inbox's for standalone ones).
+  if (isSidechatThread(thread)) return false;
   if (!options?.hideAutomationRunThreads) return true;
   if (thread.isPinned) return true;
   return !isAutomationRunThread(thread);
 }
 
-export function createSidechatSummariesForSourceSelector(
-  sourceThreadId: ThreadId,
+// Newest activity first, so index 0 is the sidechat a host reopens.
+function createSortedSidechatSummariesSelector(
+  matches: (thread: SidebarThreadSummary) => boolean,
 ): (state: AppState) => readonly SidebarThreadSummary[] {
   const selectSidebarSummaries = createSidebarThreadSummariesSelector();
   let previousSummaries: readonly SidebarThreadSummary[] | undefined;
@@ -467,9 +494,7 @@ export function createSidechatSummariesForSourceSelector(
     if (summaries === previousSummaries) return previousSidechats;
     previousSummaries = summaries;
     const nextSidechats = summaries
-      .filter(
-        (thread) => thread.sidechatSourceThreadId === sourceThreadId && thread.archivedAt == null,
-      )
+      .filter((thread) => thread.archivedAt == null && matches(thread))
       .toSorted(
         (left, right) =>
           Date.parse(right.sidechatLastActivityAt ?? right.updatedAt ?? right.createdAt) -
@@ -484,6 +509,27 @@ export function createSidechatSummariesForSourceSelector(
     previousSidechats = nextSidechats;
     return previousSidechats;
   };
+}
+
+export function createSidechatSummariesForSourceSelector(
+  sourceThreadId: ThreadId,
+): (state: AppState) => readonly SidebarThreadSummary[] {
+  return createSortedSidechatSummariesSelector(
+    (thread) => thread.sidechatSourceThreadId === sourceThreadId,
+  );
+}
+
+/** Sidechats for one GitHub item; Ask can scope reuse to its chosen project. */
+export function createSidechatSummariesForGitHubItemSelector(item: {
+  readonly projectId?: ProjectId;
+  readonly repository: string;
+  readonly number: number;
+}): (state: AppState) => readonly SidebarThreadSummary[] {
+  return createSortedSidechatSummariesSelector(
+    (thread) =>
+      (item.projectId === undefined || thread.projectId === item.projectId) &&
+      sidechatContextMatchesGitHubItem(thread.sidechatContext, item),
+  );
 }
 
 export function createSidebarDisplayThreadsSelector(

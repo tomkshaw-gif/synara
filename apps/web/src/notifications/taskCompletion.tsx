@@ -24,7 +24,6 @@ import {
   buildTaskCompletionCopy,
   collectCompletedThreadCandidates,
   completedThreadNotificationKey,
-  shouldNotifyThreadCompletion,
   collectCompletedTerminalCandidates,
   collectInputNeededThreadCandidates,
   collectTerminalAttentionCandidates,
@@ -223,7 +222,6 @@ export function TaskCompletionNotifications() {
       threads,
     ).filter(
       (candidate) =>
-        shouldNotifyThreadCompletion(threads.find((thread) => thread.id === candidate.threadId)) &&
         isNotificationRuntimeFreshTimestamp(candidate.completedAt, runtimeStartedAtMs) &&
         !notifiedCompletionKeysRef.current.has(completedThreadNotificationKey(candidate)),
     );

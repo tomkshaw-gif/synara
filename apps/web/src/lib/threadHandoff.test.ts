@@ -1,6 +1,5 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_SERVER_SETTINGS_VIEW,
   EventId,
   MessageId,
   type ModelSelection,
@@ -9,11 +8,12 @@ import {
   type ServerProviderStatus,
 } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
+import { AppSettingsSchema, getProviderInstanceOptions } from "../appSettings";
 import {
   buildThreadHandoffImportedActivities,
   buildThreadHandoffImportedMessages,
-  resolveAvailableHandoffTargetProviders,
-  resolveThreadHandoffTitle,
+  resolveAvailableHandoffTargets,
+  resolveThreadHandoffAvailability,
   resolveThreadHandoffModelSelection,
 } from "./threadHandoff";
 import { appendAssistantSelectionsToPrompt } from "./assistantSelections";
@@ -24,6 +24,20 @@ import {
 } from "./browserAnnotations";
 
 describe("threadHandoff", () => {
+  const readyStatus = (
+    provider: ProviderKind,
+    overrides: Partial<ServerProviderStatus> = {},
+  ): ServerProviderStatus => ({
+    provider,
+    instanceId: provider,
+    driver: provider,
+    status: "ready",
+    available: true,
+    authStatus: "authenticated",
+    checkedAt: "2026-08-07T12:00:00.000Z",
+    ...overrides,
+  });
+
   it("strips source-thread browser annotations and selections from imported messages", () => {
     const sourceMessageId = MessageId.makeUnsafe("source-user-message");
     const annotation: BrowserAnnotationDraft = {
@@ -133,29 +147,15 @@ describe("threadHandoff", () => {
   });
 
   it("excludes disabled, missing, unavailable, and unauthenticated handoff targets", () => {
-    const readyStatus = (
-      provider: ProviderKind,
-      overrides: Partial<ServerProviderStatus> = {},
-    ): ServerProviderStatus => ({
-      provider,
-      status: "ready",
-      available: true,
-      authStatus: "authenticated",
-      checkedAt: "2026-08-07T12:00:00.000Z",
-      ...overrides,
-    });
-    const providerSettings = {
-      ...DEFAULT_SERVER_SETTINGS_VIEW.providers,
-      antigravity: {
-        ...DEFAULT_SERVER_SETTINGS_VIEW.providers.antigravity,
-        enabled: false,
-      },
-    };
-
+    const providerInstances = getProviderInstanceOptions(
+      AppSettingsSchema.makeUnsafe({
+        providerInstances: { antigravity: { driver: "antigravity", enabled: false } },
+      }),
+    );
     expect(
-      resolveAvailableHandoffTargetProviders({
+      resolveAvailableHandoffTargets({
         sourceProvider: "codex",
-        providerSettings,
+        providerInstances,
         providerStatuses: [
           readyStatus("codex"),
           readyStatus("claudeAgent"),
@@ -165,37 +165,81 @@ describe("threadHandoff", () => {
           readyStatus("opencode", { authStatus: "unknown" }),
         ],
       }),
-    ).toEqual(["claudeAgent", "opencode"]);
+    ).toEqual([
+      { provider: "claudeAgent", instanceId: "claudeAgent", label: "Claude" },
+      { provider: "opencode", instanceId: "opencode", label: "OpenCode" },
+    ]);
   });
 
-  it("does not expose targets before enabled-provider settings are available", () => {
+  it("does not expose targets before provider health is available", () => {
     expect(
-      resolveAvailableHandoffTargetProviders({
+      resolveAvailableHandoffTargets({
         sourceProvider: "codex",
-        providerSettings: undefined,
-        providerStatuses: [
-          {
-            provider: "claudeAgent",
-            status: "ready",
-            available: true,
-            authStatus: "authenticated",
-            checkedAt: "2026-08-07T12:00:00.000Z",
-          },
-        ],
+        providerInstances: getProviderInstanceOptions(AppSettingsSchema.makeUnsafe({})),
+        providerStatuses: [],
       }),
     ).toEqual([]);
   });
 
-  it("preserves the source thread title for the created handoff thread", () => {
-    expect(resolveThreadHandoffTitle({ title: "General Greeting" })).toBe("General Greeting");
-    expect(resolveThreadHandoffTitle({ title: "  Debug   Grok handoff  " })).toBe(
-      "Debug Grok handoff",
+  it("does not borrow a default account's health for unavailable or unchecked accounts", () => {
+    const providerInstances = getProviderInstanceOptions(
+      AppSettingsSchema.makeUnsafe({
+        providerInstances: {
+          claude_work: { driver: "claudeAgent", displayName: "Claude work" },
+          claude_unchecked: { driver: "claudeAgent", displayName: "Claude unchecked" },
+        },
+      }),
     );
+    expect(
+      resolveAvailableHandoffTargets({
+        sourceProvider: "codex",
+        providerInstances,
+        providerStatuses: [
+          readyStatus("claudeAgent"),
+          readyStatus("claudeAgent", {
+            instanceId: "claude_work",
+            available: false,
+            status: "error",
+          }),
+        ],
+      }),
+    ).toEqual([{ provider: "claudeAgent", instanceId: "claudeAgent", label: "Claude" }]);
+  });
+
+  it("offers usable accounts of the source provider while excluding only the source account", () => {
+    const providerInstances = getProviderInstanceOptions(
+      AppSettingsSchema.makeUnsafe({
+        providerInstances: {
+          claude_personal: { driver: "claudeAgent", displayName: "Claude personal" },
+          claude_work: { driver: "claudeAgent", displayName: "Claude work" },
+        },
+      }),
+    );
+    expect(
+      resolveAvailableHandoffTargets({
+        sourceProvider: "claudeAgent",
+        sourceProviderInstanceId: "claude_personal",
+        providerInstances,
+        providerStatuses: [
+          readyStatus("claudeAgent"),
+          readyStatus("claudeAgent", { instanceId: "claude_personal" }),
+          readyStatus("claudeAgent", {
+            instanceId: "claude_work",
+            status: "warning",
+            authStatus: "unknown",
+          }),
+        ],
+      }),
+    ).toEqual([
+      { provider: "claudeAgent", instanceId: "claudeAgent", label: "Claude" },
+      { provider: "claudeAgent", instanceId: "claude_work", label: "Claude work" },
+    ]);
   });
 
   it("prefers sticky model selection for the chosen handoff target", () => {
     const stickySelection = {
       provider: "antigravity",
+      instanceId: "antigravity_work",
       model: "Gemini 3.5 Flash",
     } satisfies ModelSelection;
 
@@ -208,15 +252,66 @@ describe("threadHandoff", () => {
           },
         },
         targetProvider: "antigravity",
+        targetProviderInstanceId: "antigravity_work",
         projectDefaultModelSelection: {
           provider: "antigravity",
           model: "Claude Sonnet 4.6",
         },
         stickyModelSelectionByProvider: {
-          antigravity: stickySelection,
+          antigravity_work: stickySelection,
         },
       }),
     ).toEqual(stickySelection);
+  });
+
+  it("does not borrow provider-only sticky selections for a custom target instance", () => {
+    expect(
+      resolveThreadHandoffModelSelection({
+        sourceThread: {
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+        },
+        targetProvider: "antigravity",
+        targetProviderInstanceId: "antigravity_work",
+        projectDefaultModelSelection: null,
+        stickyModelSelectionByProvider: {
+          antigravity: {
+            provider: "antigravity",
+            model: "Gemini 3.1 Pro",
+          },
+        },
+      }),
+    ).toEqual({
+      provider: "antigravity",
+      instanceId: "antigravity_work",
+      model: "Gemini 3.5 Flash",
+    });
+  });
+
+  it("adds the chosen target instance id to project-default handoff selections", () => {
+    expect(
+      resolveThreadHandoffModelSelection({
+        sourceThread: {
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.4",
+          },
+        },
+        targetProvider: "claudeAgent",
+        targetProviderInstanceId: "claude_work",
+        projectDefaultModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+        },
+        stickyModelSelectionByProvider: {},
+      }),
+    ).toEqual({
+      provider: "claudeAgent",
+      instanceId: "claude_work",
+      model: "claude-sonnet-4-6",
+    });
   });
 
   it("falls back to the resolved provider default model when no sticky or project default exists", () => {
@@ -229,12 +324,47 @@ describe("threadHandoff", () => {
           },
         },
         targetProvider: "codex",
+        targetProviderInstanceId: "codex_personal",
         projectDefaultModelSelection: null,
         stickyModelSelectionByProvider: {},
       }),
     ).toEqual({
       provider: "codex",
+      instanceId: "codex_personal",
       model: DEFAULT_MODEL_BY_PROVIDER.codex,
     });
+  });
+
+  it("offers provider and workspace handoff for an ordinary project thread", () => {
+    expect(
+      resolveThreadHandoffAvailability({
+        isGroupContainer: false,
+        isCoordinatorThread: false,
+      }),
+    ).toEqual({ providerHandoff: true, workspaceHandoff: true });
+  });
+
+  it("keeps provider handoff for a group chat but hides workspace handoff", () => {
+    expect(
+      resolveThreadHandoffAvailability({
+        isGroupContainer: true,
+        isCoordinatorThread: false,
+      }),
+    ).toEqual({ providerHandoff: true, workspaceHandoff: false });
+  });
+
+  it("hides every handoff action for the coordinator thread", () => {
+    expect(
+      resolveThreadHandoffAvailability({
+        isGroupContainer: true,
+        isCoordinatorThread: true,
+      }),
+    ).toEqual({ providerHandoff: false, workspaceHandoff: false });
+    expect(
+      resolveThreadHandoffAvailability({
+        isGroupContainer: false,
+        isCoordinatorThread: true,
+      }),
+    ).toEqual({ providerHandoff: false, workspaceHandoff: false });
   });
 });

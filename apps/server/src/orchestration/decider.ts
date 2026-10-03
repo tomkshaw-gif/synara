@@ -26,7 +26,9 @@ import {
   workspaceRootsEqual,
 } from "@synara/shared/threadWorkspace";
 import { collectSubagentDescendants } from "@synara/shared/threadHierarchy";
+import { isSidechatThread } from "@synara/shared/sidechatThread";
 import { autoRuntimeModeSelectionIssue } from "@synara/shared/runtimeMode";
+import { isGroupContainerKind } from "@synara/shared/projectContainers";
 import { providerSupportsNativeTurnSteering } from "@synara/shared/providerMetadata";
 import {
   collectTailTurnIds,
@@ -37,7 +39,6 @@ import { Effect } from "effect";
 import { computerActivationMetadata } from "../computer/computerActivation.ts";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
-import { threadOwnsProviderSession } from "./providerSessionThread.ts";
 import { withProjectRelocationEvents } from "./projectRelocation.ts";
 import { buildForkThreadTitle } from "./forkThreadTitle.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
@@ -69,7 +70,6 @@ import {
   requireSpaceAssignableProject,
   requireSpaceNameAvailable,
   type SpaceAssignmentWorkspacePaths,
-  requireSubagentThreadParent,
   requireThread,
   requireThreadAbsent,
   requireThreadArchived,
@@ -86,10 +86,10 @@ const nowIso = () => new Date().toISOString();
 // an unrecorded preference should degrade to live output, never to a silent
 // buffer that withholds the whole assistant message until turn completion.
 const DEFAULT_ASSISTANT_DELIVERY_MODE = "streaming" as const;
-const STUDIO_PROJECT_KIND_SET = new Set<ProjectKind>(["studio"]);
+const GROUP_CONTAINER_PROJECT_KIND_SET = new Set<ProjectKind>(["studio", "group"]);
 // Kinds that claim exclusive ownership of a workspace root. Chat containers are excluded: they
 // use placeholder roots (e.g. the home dir) that legitimately coexist with real projects.
-const WORKSPACE_OWNING_PROJECT_KIND_SET = new Set<ProjectKind>(["project", "studio"]);
+const WORKSPACE_OWNING_PROJECT_KIND_SET = new Set<ProjectKind>(["project", "studio", "group"]);
 
 function validateSidechatExecutionAvailable(
   command: Pick<OrchestrationCommand, "type">,
@@ -103,6 +103,30 @@ function validateSidechatExecutionAvailable(
         }),
       )
     : Effect.void;
+}
+
+// A standalone sidechat is a top-level, user-created thread in the project's own checkout:
+// no source thread to fork or return to, no parent, no worktree or branch switch.
+function validateStandaloneSidechatCreate(
+  command: Extract<OrchestrationCommand, { type: "thread.create" }>,
+) {
+  const conflict =
+    command.sourceThreadId !== undefined ||
+    command.sourceTurnId !== undefined ||
+    command.creationSource !== undefined ||
+    command.parentThreadId != null
+      ? "A standalone side chat cannot also have a source or parent thread."
+      : (command.envMode ?? "local") !== "local" || command.worktreePath != null
+        ? "A standalone side chat runs in the project's local checkout."
+        : null;
+  return conflict === null
+    ? Effect.void
+    : Effect.fail(
+        new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: conflict,
+        }),
+      );
 }
 
 function validateAutoRuntimeMode(
@@ -368,7 +392,7 @@ function resolveCreatedThreadWorkspaceMetadata(
   projectKind: ProjectKind | undefined,
   command: CreatedThreadWorkspaceCommand,
 ) {
-  if (projectKind === "studio") {
+  if (isGroupContainerKind(projectKind)) {
     return {
       envMode: "local" as const,
       branch: null,
@@ -484,7 +508,7 @@ function resolveThreadWorkspaceMetadataPatch(
   command: Extract<OrchestrationCommand, { type: "thread.meta.update" }>,
   currentThread: OrchestrationThread,
 ) {
-  if (projectKind === "studio") {
+  if (isGroupContainerKind(projectKind)) {
     return {
       envMode: "local" as const,
       branch: null,
@@ -757,7 +781,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         const existingStudioProject = listActiveProjectsByWorkspaceRoot(
           readModel,
           command.workspaceRoot,
-          { kinds: STUDIO_PROJECT_KIND_SET },
+          { kinds: GROUP_CONTAINER_PROJECT_KIND_SET },
         )[0];
         if (existingStudioProject) {
           return yield* new OrchestrationCommandInvariantError({
@@ -800,9 +824,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           });
         }
       }
-      if (nextProjectKind === "studio") {
+      if (isGroupContainerKind(nextProjectKind)) {
         // Cross-kind on purpose: a regular project already using this root would otherwise
-        // coexist with the Studio container, breaking workspace-root-to-project uniqueness
+        // coexist with the group container, breaking workspace-root-to-project uniqueness
         // that shell snapshot mapping and duplicate recovery rely on.
         const existingOwningProject = listActiveProjectsByWorkspaceRoot(
           readModel,
@@ -1046,24 +1070,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      // Gateway-created subagents get their parent checked like the Auto-mode
-      // gate below; provider-native mirrors are replayed history, so rejecting
-      // them here would durably poison the runtime journal instead of
-      // preventing anything.
-      if (command.parentThreadId != null && command.creationSource !== "provider_native") {
-        yield* requireSubagentThreadParent({
-          readModel,
-          command,
-          parentThreadId: command.parentThreadId,
-          projectId: command.projectId,
-        });
-      }
       // Provider-native threads mirror subagents the provider already runs;
       // Synara never starts a session for them, so the Auto-mode capability
       // check can only reject the projection (and durably poison the runtime
       // journal replaying it), never prevent an unverified Auto session.
       if (command.creationSource !== "provider_native") {
         yield* validateAutoRuntimeMode(command, command.modelSelection, command.runtimeMode);
+      }
+      const sidechatContext = command.sidechatContext ?? null;
+      if (sidechatContext !== null) {
+        yield* validateStandaloneSidechatCreate(command);
       }
       return {
         ...withEventBase({
@@ -1081,10 +1097,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
           ...resolveCreatedThreadWorkspaceMetadata(project.kind, command),
-          createBranchFlowCompleted:
-            project.kind === "studio" ? false : command.createBranchFlowCompleted,
+          createBranchFlowCompleted: isGroupContainerKind(project.kind)
+            ? false
+            : command.createBranchFlowCompleted,
           isPinned: command.isPinned,
-          userStatus: command.userStatus ?? null,
           parentThreadId: command.parentThreadId,
           ...(command.creationSource !== undefined
             ? {
@@ -1099,6 +1115,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           subagentNickname: command.subagentNickname,
           subagentRole: command.subagentRole,
           forkSourceThreadId: null,
+          // A standalone sidechat starts its inactivity clock at creation, like a forked one.
+          ...(sidechatContext !== null
+            ? {
+                sidechatContext,
+                sidechatLastActivityAt: command.createdAt,
+                sidechatExpiredAt: null,
+              }
+            : {}),
           lastKnownPr: command.lastKnownPr,
           handoff: null,
           createdAt: command.createdAt,
@@ -1159,10 +1183,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
           ...resolveCreatedThreadWorkspaceMetadata(project.kind, command),
-          createBranchFlowCompleted:
-            project.kind === "studio" ? false : command.createBranchFlowCompleted,
+          createBranchFlowCompleted: isGroupContainerKind(project.kind)
+            ? false
+            : command.createBranchFlowCompleted,
           isPinned: false,
-          userStatus: null,
           parentThreadId: null,
           subagentAgentId: null,
           subagentNickname: null,
@@ -1261,10 +1285,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
           ...resolveCreatedThreadWorkspaceMetadata(project.kind, command),
-          createBranchFlowCompleted:
-            project.kind === "studio" ? false : command.createBranchFlowCompleted,
+          createBranchFlowCompleted: isGroupContainerKind(project.kind)
+            ? false
+            : command.createBranchFlowCompleted,
           isPinned: false,
-          userStatus: null,
           parentThreadId: null,
           subagentAgentId: null,
           subagentNickname: null,
@@ -1312,7 +1336,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "thread.sidechat.activity.record": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
-      if (!thread.sidechatSourceThreadId) {
+      if (!isSidechatThread(thread)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Thread '${command.threadId}' is not a side chat.`,
@@ -1342,7 +1366,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "thread.sidechat.expire": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
-      if (!thread.sidechatSourceThreadId) {
+      if (!isSidechatThread(thread)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Thread '${command.threadId}' is not a side chat.`,
@@ -1545,7 +1569,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...resolveThreadWorkspaceMetadataPatch(project?.kind, command, thread),
           ...(command.isPinned !== undefined ? { isPinned: command.isPinned } : {}),
-          ...(command.userStatus !== undefined ? { userStatus: command.userStatus } : {}),
           ...(command.isSettled !== undefined
             ? { settledAt: command.isSettled ? occurredAt : null }
             : {}),
@@ -1850,15 +1873,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         targetThread.session?.providerName ?? targetThread.modelSelection.provider;
       const isThreadRunning =
         targetThread.session?.status === "running" && targetThread.session.activeTurnId !== null;
-      // Native subagent mirrors steer the running child task through the parent
-      // session, so queueing until that turn settles would deliver the message
-      // after the subagent already finished. Gateway workers own a provider
-      // session and follow the same queue rules as a standalone chat.
+      // Subagent threads never queue: their messages steer the running child task
+      // through the parent session, so deferring until the turn settles would
+      // deliver the message only after the subagent already finished.
       // Steers ride the live turn natively only on providers whose runtime can
       // inject mid-turn input; everywhere else they queue and interrupt below.
-      const sharesParentProviderSession = !threadOwnsProviderSession(targetThread);
       const shouldQueue =
-        !sharesParentProviderSession &&
+        targetThread.parentThreadId === null &&
         (targetThread.claudeCacheReview != null ||
           (isThreadRunning &&
             (dispatchMode === "queue" || !providerSupportsNativeTurnSteering(activeProvider))));

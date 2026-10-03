@@ -18,9 +18,9 @@ import {
   normalizeAntigravityModelOptions,
   normalizeClaudeModelOptions,
   normalizeCursorModelOptions,
+  normalizeOmpModelOptions,
   normalizeOpenCodeModelOptions,
   normalizePiModelOptions,
-  parseDevinFusionModelUid,
   resolveDevinModelVariant,
   resolveLabeledOptionValue,
   trimOrNull,
@@ -176,26 +176,27 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
             ? rawContextWindow
             : undefined,
       });
-      const nextOptions =
-        modelVariant !== undefined && parseDevinFusionModelUid(modelVariant) !== null
-          ? // A Fusion uid already encodes lead effort, fast tier, and sidekick;
-            // trait fields are meaningless to it and only invite stale overrides.
-            { modelVariant }
-          : {
-              ...(reasoningEffort ? { reasoningEffort } : {}),
-              ...(fastModeEnabled ? { fastMode: true } : {}),
-              ...(requestedThinking !== undefined ? { thinking: requestedThinking } : {}),
-              ...(contextWindow ? { contextWindow } : {}),
-              ...(modelVariant &&
-              (Boolean(reasoningEffort) ||
-                fastModeEnabled ||
-                requestedThinking !== undefined ||
-                Boolean(contextWindow) ||
-                Boolean(providerOptions?.modelVariant))
-                ? { modelVariant }
-                : {}),
-            };
+      const nextOptions = {
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(fastModeEnabled ? { fastMode: true } : {}),
+        ...(requestedThinking !== undefined ? { thinking: requestedThinking } : {}),
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(modelVariant &&
+        (Boolean(reasoningEffort) ||
+          fastModeEnabled ||
+          requestedThinking !== undefined ||
+          Boolean(contextWindow) ||
+          Boolean(providerOptions?.modelVariant))
+          ? { modelVariant }
+          : {}),
+      };
       normalizedOptions = Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+      break;
+    }
+    case "omp": {
+      const providerOptions = modelOptions?.omp;
+      rawEffort = trimOrNull(providerOptions?.thinkingLevel);
+      normalizedOptions = normalizeOmpModelOptions(providerOptions);
       break;
     }
   }

@@ -10,12 +10,16 @@ import {
   type OrchestrationShellStreamEvent,
   type SpaceId,
   type ThreadId,
-  type ThreadUserStatus,
 } from "@synara/contracts";
 import { Debouncer } from "@tanstack/react-pacer";
 import { resolveThreadBranchRegressionGuard } from "@synara/shared/git";
 import { create } from "zustand";
 
+import {
+  normalizeProjectAppearance,
+  projectAppearanceEquals,
+  type ProjectAppearance,
+} from "./lib/projectAppearance";
 import { resolveCreateBranchFlowCompletedMerge } from "./storeNormalization";
 import {
   applySpaceOrder,
@@ -34,6 +38,7 @@ import {
 import { applyOrchestrationEvents, applyOrchestrationEventsHotPath } from "./storeEventReducer";
 import { persistState, readPersistedState, rememberProjectState } from "./storePersistence";
 import { initialState, type AppState } from "./storeState";
+import { persistThreadVisitedState } from "./threadVisitedPersistence";
 import type { Project, ThreadWorkspacePatch } from "./types";
 
 type ReadModelThread = OrchestrationReadModel["threads"][number];
@@ -55,12 +60,18 @@ export {
 } from "./storeProjection";
 export { applyOrchestrationEvents, applyOrchestrationEventsHotPath } from "./storeEventReducer";
 
-const debouncedPersistState = new Debouncer(persistState, { wait: 500 });
+const debouncedPersistState = new Debouncer(
+  (state: AppState) => {
+    persistState(state);
+    persistThreadVisitedState(state);
+  },
+  { wait: 500 },
+);
 
 export function persistAppStateNow(state: AppState = useStore.getState()): void {
   persistState(state);
+  persistThreadVisitedState(state, { force: true });
 }
-
 export function markThreadVisited(
   state: AppState,
   threadId: ThreadId,
@@ -89,17 +100,6 @@ export function markThreadUnread(state: AppState, threadId: ThreadId): AppState 
     const unreadVisitedAt = new Date(latestTurnCompletedAtMs - 1).toISOString();
     if (thread.lastVisitedAt === unreadVisitedAt) return thread;
     return { ...thread, lastVisitedAt: unreadVisitedAt };
-  });
-}
-
-export function setThreadUserStatus(
-  state: AppState,
-  threadId: ThreadId,
-  userStatus: ThreadUserStatus | null,
-): AppState {
-  return applyThreadUpdate(state, threadId, (thread) => {
-    if ((thread.userStatus ?? null) === userStatus) return thread;
-    return { ...thread, userStatus };
   });
 }
 
@@ -186,6 +186,22 @@ export function renameProjectLocally(
       name: nextName,
       localName: nextLocalName,
     };
+  });
+  return changed ? { ...state, projects } : state;
+}
+
+export function setProjectAppearanceLocally(
+  state: AppState,
+  projectId: Project["id"],
+  appearance: ProjectAppearance | null,
+): AppState {
+  const nextAppearance = normalizeProjectAppearance(appearance);
+  let changed = false;
+  const projects = state.projects.map((project) => {
+    if (project.id !== projectId) return project;
+    if (projectAppearanceEquals(project.appearance ?? null, nextAppearance)) return project;
+    changed = true;
+    return { ...project, appearance: nextAppearance };
   });
   return changed ? { ...state, projects } : state;
 }
@@ -284,7 +300,6 @@ interface AppStore extends AppState {
   removeDeletedThreadFromClientState: (threadId: ThreadId) => void;
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId) => void;
-  setThreadUserStatus: (threadId: ThreadId, userStatus: ThreadUserStatus | null) => void;
   toggleProject: (projectId: Project["id"]) => void;
   setProjectExpanded: (projectId: Project["id"], expanded: boolean) => void;
   setAllProjectsExpanded: (expanded: boolean) => void;
@@ -292,6 +307,10 @@ interface AppStore extends AppState {
   reorderProjects: (draggedProjectId: Project["id"], targetProjectId: Project["id"]) => void;
   reorderSpacesLocally: (orderedSpaceIds: ReadonlyArray<SpaceId>) => void;
   renameProjectLocally: (projectId: Project["id"], name: string | null) => void;
+  setProjectAppearanceLocally: (
+    projectId: Project["id"],
+    appearance: ProjectAppearance | null,
+  ) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadWorkspace: (threadId: ThreadId, patch: ThreadWorkspacePatch) => void;
 }
@@ -335,8 +354,6 @@ export const useStore = create<AppStore>((set) => ({
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId) => set((state) => markThreadUnread(state, threadId)),
-  setThreadUserStatus: (threadId, userStatus) =>
-    set((state) => setThreadUserStatus(state, threadId, userStatus)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
@@ -349,6 +366,10 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => applySpaceOrder(state, orderedSpaceIds)),
   renameProjectLocally: (projectId, name) => {
     set((state) => renameProjectLocally(state, projectId, name));
+    persistAppStateNow();
+  },
+  setProjectAppearanceLocally: (projectId, appearance) => {
+    set((state) => setProjectAppearanceLocally(state, projectId, appearance));
     persistAppStateNow();
   },
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
