@@ -707,7 +707,7 @@ export function deriveMessagesTimelineRows(input: {
       // conversation-only surfaces, so they must never join a mergeable group.
       // Background task completions do too: they separate two responses.
       for (const runEntry of run) {
-        if (isStandaloneWorkEntry(runEntry.entry)) {
+        if (isStandaloneWorkEntry(runEntry.entry) || runEntry.entry.backgroundTaskCompletion) {
           flushPendingWorkGroup();
           nextRows.push({
             kind: "work",

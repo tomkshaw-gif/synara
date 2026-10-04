@@ -24,7 +24,7 @@ import { type MessageTrailAudioSource, type TimestampFormat } from "../../appSet
 import { type TurnDiffSummary, type WorktreeSetupSnapshot } from "../../types";
 import { ArrowDownIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
-import { AUDIO_LEVEL_SUBSCRIBERS, isAudioLevelAvailable } from "~/lib/audioLevel";
+import { getAudioLevelSubscriber, isAudioLevelAvailable } from "~/lib/audioLevel";
 import { DISCLOSURE_CONTENT_MOTION_CLASS } from "~/lib/disclosureMotion";
 import { type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ChatEmptyStateHero } from "./ChatEmptyStateHero";
@@ -58,6 +58,8 @@ interface ChatTranscriptPaneProps {
   hasMessages: boolean;
   isRevertingCheckpoint: boolean;
   isTemporaryThread?: boolean;
+  /** A new chat the server has not created yet. The server refuses history requests for it. */
+  isLocalDraft?: boolean;
   isWorking: boolean;
   workingLabel?: ComponentProps<typeof MessagesTimeline>["workingLabel"];
   followLiveOutput: boolean;
@@ -113,6 +115,8 @@ interface ChatTranscriptPaneProps {
   timestampFormat: TimestampFormat;
   /** Sound the message trail moves with (macOS desktop setting). */
   messageTrailAudioSource?: MessageTrailAudioSource;
+  /** Core Audio UID of the microphone the trail listens to; "" follows the Mac default. */
+  messageTrailMicrophoneId?: string;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   conversationOnly?: boolean;
   /** Stored thread-level error, rendered in flow above the transcript. */
@@ -149,6 +153,7 @@ export function ChatTranscriptPane({
   hasMessages,
   isRevertingCheckpoint,
   isTemporaryThread,
+  isLocalDraft,
   isWorking,
   workingLabel,
   followLiveOutput,
@@ -201,6 +206,7 @@ export function ChatTranscriptPane({
   hubWorkItemsByMessageId,
   timestampFormat,
   messageTrailAudioSource,
+  messageTrailMicrophoneId,
   turnDiffSummaryByAssistantMessageId,
   conversationOnly,
   threadError,
@@ -243,7 +249,7 @@ export function ChatTranscriptPane({
   useEffect(() => {
     activeTrailStore.set(null);
   }, [activeThreadId, activeTrailStore]);
-  const importedHistory = useImportedHistory(activeThreadId, !isTemporaryThread);
+  const importedHistory = useImportedHistory(activeThreadId, !isTemporaryThread && !isLocalDraft);
   const olderTimelineEntries = useMemo(
     () =>
       importedHistory.messages.map((message) => ({
@@ -460,7 +466,7 @@ export function ChatTranscriptPane({
               messageTrailAudioSource &&
               messageTrailAudioSource !== "off" &&
               isAudioLevelAvailable()
-                ? AUDIO_LEVEL_SUBSCRIBERS[messageTrailAudioSource]
+                ? getAudioLevelSubscriber(messageTrailAudioSource, messageTrailMicrophoneId)
                 : undefined
             }
           />

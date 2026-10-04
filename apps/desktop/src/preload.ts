@@ -183,7 +183,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IPC.computerSetCursorStyle, style),
   },
   audioLevel: {
-    setSource: (source) => ipcRenderer.invoke(IPC.audioLevel.setSource, source),
+    setSource: (source, microphoneId) =>
+      ipcRenderer.invoke(IPC.audioLevel.setSource, source, microphoneId ?? null),
+    listMicrophones: () => ipcRenderer.invoke(IPC.audioLevel.listMicrophones),
     onLevel: (listener) => {
       const wrappedListener = (_event: Electron.IpcRendererEvent, level: unknown) => {
         if (typeof level !== "number" || !Number.isFinite(level)) return;
@@ -207,6 +209,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IPC.menuAction, wrappedListener);
     };
   },
+  setMenuShortcuts: (shortcuts) => ipcRenderer.invoke(IPC.setMenuShortcuts, shortcuts),
   onQuitConfirmationRequest: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       const request = parseQuitConfirmationRequest(payload);

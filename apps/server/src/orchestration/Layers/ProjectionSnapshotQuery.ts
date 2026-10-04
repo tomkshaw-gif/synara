@@ -725,6 +725,8 @@ function toProjectedThreadShellFromStoredSummary(input: {
     updatedAt: threadRow.updatedAt,
     archivedAt: threadRow.archivedAt ?? null,
     settledAt: threadRow.settledAt ?? null,
+    snoozedUntil: threadRow.snoozedUntil ?? null,
+    snoozeReminderAt: threadRow.snoozeReminderAt ?? null,
     handoff: threadRow.handoff,
     ...(threadRow.claudeCacheReview != null
       ? { claudeCacheReview: threadRow.claudeCacheReview }
@@ -784,6 +786,8 @@ function toProjectedThread(input: {
     updatedAt: threadRow.updatedAt,
     archivedAt: threadRow.archivedAt ?? null,
     settledAt: threadRow.settledAt ?? null,
+    snoozedUntil: threadRow.snoozedUntil ?? null,
+    snoozeReminderAt: threadRow.snoozeReminderAt ?? null,
     deletedAt: threadRow.deletedAt,
     handoff: threadRow.handoff,
     ...(threadRow.claudeCacheReview != null
@@ -1013,6 +1017,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
           settled_at AS "settledAt",
+          snoozed_until AS "snoozedUntil",
+          snooze_reminder_at AS "snoozeReminderAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -1070,6 +1076,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
           settled_at AS "settledAt",
+          snoozed_until AS "snoozedUntil",
+          snooze_reminder_at AS "snoozeReminderAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -1736,6 +1744,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
           settled_at AS "settledAt",
+          snoozed_until AS "snoozedUntil",
+          snooze_reminder_at AS "snoozeReminderAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -1798,6 +1808,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
           settled_at AS "settledAt",
+          snoozed_until AS "snoozedUntil",
+          snooze_reminder_at AS "snoozeReminderAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE ${threadId} LIKE ('subagent:' || thread_id || ':%')
@@ -2129,6 +2141,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
           settled_at AS "settledAt",
+          snoozed_until AS "snoozedUntil",
+          snooze_reminder_at AS "snoozeReminderAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id IN ${sql.in(threadIds)}
@@ -2146,6 +2160,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           status,
           provider_name AS "providerName",
+          provider_instance_id AS "providerInstanceId",
           provider_session_id AS "providerSessionId",
           provider_thread_id AS "providerThreadId",
           runtime_mode AS "runtimeMode",

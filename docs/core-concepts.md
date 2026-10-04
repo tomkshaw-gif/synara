@@ -106,6 +106,31 @@ the conversation or split from one exact turn. Use a
 [handoff](https://www.trysynara.com/docs/workflows/handoffs) when another provider should continue
 the same task and ownership boundary.
 
+Use **Snooze** in a thread's context menu to return to it in 30 minutes, 1 hour,
+2 hours, or tomorrow at 9am. It moves to **Snoozed** and leaves ordinary thread lists
+and attention badges until the reminder is due. **Return now** cancels the snooze;
+choosing another time reschedules it. Snoozing preserves any running agent work.
+Sending a new message also returns the thread to the list.
+
+When due, the thread returns to recent activity and Synara shows a reminder using
+your notification settings. If Synara and its server are closed, the overdue
+reminder is recovered when they start again.
+
+In Beta, **Auto-fix CI** in the Environment panel's pull request menu watches open PRs
+for this chat, including other PRs in its stack. One chat can own the active watch for a
+PR. A paused watch releases ownership; resuming it requires that no other chat owns it.
+The server checks every minute and starts at most one fix turn for each failing commit,
+using the chat's permissions. It waits for active turns, background tasks, approvals,
+questions, and Plan mode. Switching to another PR requires a clean working tree; the fix
+request names the canonical GitHub PR and asks the agent to verify its commit before
+editing and restore the original checkout afterwards. A failure streak allows three
+attempts. Green checks reset the attempt budget even after a rerun on the same commit.
+After a turn finishes, the watcher allows a minute for GitHub to report a pushed head.
+If the head still has not changed and CI is not green, or a request has no accepted durable
+command receipt after restart, it pauses with a transcript notice. Turn it
+on again to resume. Turning it off cancels pending watch decisions, and closed PRs stop
+being watched. Stable does not start this watcher or accept its RPC operations.
+
 Sidechats keep the source chat's project, folder, branch, and Local/Worktree environment. Their
 empty view shows the composer without the new-chat welcome screen or independent project, folder,
 branch, Local/Worktree, or Temporary controls.
@@ -118,7 +143,8 @@ A sidechat can also stand alone, with no source chat: **Ask** on a Code review i
 that pull request or issue. It has no transcript to import and no permissions to inherit, so it
 starts in Ask for approval, runs in the project's own checkout without switching branches, and
 is told to treat the item's text as untrusted reference data. Like any sidechat it stays out of
-the thread list and expires after an hour of inactivity. Its empty view likewise shows only the
+the thread list and expires after the inactivity window set in Settings → Conversation
+(1 hour by default, 24 hours, or never). Its empty view likewise shows only the
 composer and keeps the workspace assigned by Code review.
 
 ## Code review
@@ -288,6 +314,8 @@ scaling beyond one task.
 - `mod+d` — toggle the diff view
 - `mod+shift+b` — toggle the browser
 - `mod+\` — split the current view
+- `mod+1` through `mod+9` — open a numbered sidebar thread. Hold `mod` to show the
+  default numbers in the classic and Activity views.
 
 Check the [keyboard reference](https://www.trysynara.com/docs/reference/keyboard-shortcuts) for the
 complete current list.

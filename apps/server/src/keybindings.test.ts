@@ -1,4 +1,11 @@
-import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from "@synara/contracts";
+import {
+  KeybindingCommand,
+  KeybindingRule,
+  KeybindingsConfig,
+  MAX_KEYBINDINGS_COUNT,
+  MAX_RESOLVED_KEYBINDINGS_COUNT,
+  ResolvedKeybindingsConfig,
+} from "@synara/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
@@ -8,9 +15,12 @@ import { ServerConfig } from "./config";
 import {
   applyKeybindingEdits,
   DEFAULT_KEYBINDINGS,
+  KEYBINDING_EDIT_STALE_DETAIL,
+  KEYBINDING_LIMIT_DETAIL,
   Keybindings,
-  KeybindingsConfigError,
+  KeybindingsEditRejectedError,
   KeybindingsLive,
+  type KeybindingsWriteError,
   ResolvedKeybindingFromConfig,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
@@ -30,7 +40,7 @@ const makeKeybindingsLayer = () => {
   );
 };
 
-const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R>) =>
+const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsWriteError, R>) =>
   effect.pipe(
     Effect.mapError((error) => error.detail),
     Effect.result,
@@ -44,6 +54,27 @@ const writeKeybindingsConfig = (configPath: string, rules: readonly KeybindingRu
     yield* fileSystem.makeDirectory(path.dirname(configPath), { recursive: true });
     yield* fileSystem.writeFileString(configPath, encoded);
   });
+
+const writeRawKeybindingsConfig = (configPath: string, entries: readonly unknown[]) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fileSystem.makeDirectory(path.dirname(configPath), { recursive: true });
+    yield* fileSystem.writeFileString(configPath, JSON.stringify(entries));
+  });
+
+const readRawKeybindingsConfig = (configPath: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    return JSON.parse(yield* fileSystem.readFileString(configPath)) as unknown[];
+  });
+
+// Project script rules, which no shipped default or reset touches.
+const scriptRules = (count: number): KeybindingRule[] =>
+  Array.from({ length: count }, (_, index) => ({
+    key: "mod+shift+r",
+    command: `script.s${index}.run`,
+  }));
 
 const readKeybindingsConfig = (configPath: string) =>
   Effect.gen(function* () {
@@ -148,6 +179,28 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         }),
       );
     }),
+  );
+
+  it.effect("keeps the shipped thread tab chords distinct from space navigation", () =>
+    Effect.gen(function* () {
+      const keybindings = yield* Keybindings;
+      const snapshot = yield* keybindings.loadConfigState;
+      for (const direction of ["previous", "next"] as const) {
+        const tabRules = snapshot.keybindings.filter(
+          (rule) => rule.command === `threadTab.${direction}`,
+        );
+        const spaceRules = snapshot.keybindings.filter(
+          (rule) => rule.command === `space.${direction}`,
+        );
+        assert.lengthOf(tabRules, 2);
+        assert.lengthOf(spaceRules, 1);
+        for (const tabRule of tabRules) {
+          for (const spaceRule of spaceRules) {
+            assert.notDeepEqual(tabRule.shortcut, spaceRule.shortcut);
+          }
+        }
+      }
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
   it.effect("bootstraps default keybindings when config file is missing", () =>
@@ -394,6 +447,47 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isTrue(
         persisted.some(
           (entry) => entry.key === "mod+shift+p" && entry.command === "sidebar.search",
+        ),
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("migrates colliding Mac tab defaults while preserving custom tab and space rules", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const rules: KeybindingRule[] = [
+        { key: "mod+alt+arrowleft", command: "threadTab.previous", when: "isMac" },
+        { key: "mod+alt+arrowright", command: "threadTab.next", when: "isMac" },
+        { key: "mod+alt+arrowleft", command: "space.previous", when: "!terminalFocus" },
+        { key: "mod+alt+arrowright", command: "space.next", when: "!terminalFocus" },
+        { key: "mod+shift+g", command: "threadTab.next", when: "!terminalFocus" },
+        { key: "mod+alt+arrowleft", command: "threadTab.previous", when: "!terminalFocus" },
+      ];
+      yield* writeKeybindingsConfig(keybindingsConfigPath, rules);
+      const keybindings = yield* Keybindings;
+      const snapshot = yield* keybindings.loadConfigState;
+      const expected: KeybindingRule[] = rules.map((rule, index) =>
+        index < 2
+          ? { ...rule, key: index === 0 ? "mod+ctrl+arrowleft" : "mod+ctrl+arrowright" }
+          : rule,
+      );
+      assert.deepEqual(
+        snapshot.keybindings.filter((rule) => rule.command.startsWith("threadTab.")),
+        compileResolvedKeybindingsConfig(
+          expected.filter((rule) => rule.command.startsWith("threadTab.")),
+        ),
+      );
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      for (const rule of expected) assert.deepInclude(persisted, rule);
+      assert.isFalse(
+        persisted.some((rule) =>
+          rules
+            .slice(0, 2)
+            .some(
+              (old) =>
+                old.command === rule.command && old.key === rule.key && old.when === rule.when,
+            ),
         ),
       );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
@@ -860,6 +954,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const { keybindingsConfigPath } = yield* ServerConfig;
       yield* writeKeybindingsConfig(keybindingsConfigPath, [
         { key: "mod+j", command: "script.custom-action.run" },
+        { key: "mod+ctrl+arrowright", command: "script.custom-tabs.run", when: "isMac" },
       ]);
 
       yield* Effect.gen(function* () {
@@ -870,6 +965,14 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.isFalse(persisted.some((entry) => entry.command === "terminal.toggle"));
       assert.isTrue(persisted.some((entry) => entry.command === "script.custom-action.run"));
+      assert.isFalse(
+        persisted.some((entry) => entry.command === "threadTab.next" && entry.when === "isMac"),
+      );
+      assert.deepInclude(persisted, {
+        key: "mod+ctrl+arrowright",
+        command: "script.custom-tabs.run",
+        when: "isMac",
+      });
 
       assert.isTrue(
         messages.some((message) =>
@@ -1240,7 +1343,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           [],
           [{ type: "set", rule: { key: "unassigned", command: "terminal.toggle" } }],
         ),
-        { _tag: "failure", detail: "invalid shortcut or condition expression" },
+        { _tag: "failure", reason: "invalid", detail: "invalid shortcut or condition expression" },
       );
     }),
   );
@@ -1339,5 +1442,307 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         rules: [...DEFAULT_KEYBINDINGS, { key: "mod+shift+r", command: "script.run-tests.run" }],
       });
     }),
+  );
+
+  it.effect("refuses edits made against rules that are no longer there", () =>
+    Effect.sync(() => {
+      const rules = [{ key: "mod+g", command: "terminal.toggle" }] as const;
+      const stale = {
+        _tag: "failure",
+        reason: "stale",
+        detail: KEYBINDING_EDIT_STALE_DETAIL,
+      } as const;
+
+      assert.deepEqual(
+        applyKeybindingEdits(rules, [
+          {
+            type: "set",
+            rule: { key: "mod+h", command: "terminal.toggle" },
+            replacing: { key: "mod+j", command: "terminal.toggle" },
+          },
+        ]),
+        stale,
+      );
+      assert.deepEqual(
+        applyKeybindingEdits(rules, [
+          { type: "remove", rule: { key: "mod+j", command: "terminal.toggle" } },
+        ]),
+        stale,
+      );
+      // One stale edit refuses the whole batch, including the valid edits before it.
+      assert.deepEqual(
+        applyKeybindingEdits(rules, [
+          { type: "remove", rule: { key: "mod+g", command: "terminal.toggle" } },
+          { type: "remove", rule: { key: "mod+g", command: "terminal.toggle" } },
+        ]),
+        stale,
+      );
+      // Identity is resolved, so another spelling of a live rule is not stale.
+      assert.deepEqual(
+        applyKeybindingEdits(
+          [{ key: "cmd+k", command: "sidebar.search" }],
+          [{ type: "remove", rule: { key: "meta+k", command: "sidebar.search" } }],
+        ),
+        { _tag: "success", rules: [{ key: "unassigned", command: "sidebar.search" }] },
+      );
+      // A reset names no rule, so it is never stale.
+      assert.equal(
+        applyKeybindingEdits([], [{ type: "reset", command: "terminal.toggle" }])._tag,
+        "success",
+      );
+    }),
+  );
+
+  it.effect("rejects a stale edit with a plain message and writes nothing", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const existing = [{ key: "mod+g", command: "terminal.toggle" }] as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, existing);
+
+      const error = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        return yield* keybindings.editKeybindings([
+          {
+            type: "set",
+            rule: { key: "mod+h", command: "terminal.toggle" },
+            replacing: { key: "mod+j", command: "terminal.toggle" },
+          },
+        ]);
+      }).pipe(Effect.flip);
+
+      // The web toasts `error.message` as is.
+      assert.instanceOf(error, KeybindingsEditRejectedError);
+      assert.instanceOf(error, Error);
+      assert.equal(error.message, KEYBINDING_EDIT_STALE_DETAIL);
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), existing);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("reloads the config it serves when an edit turns out stale", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+g", command: "terminal.toggle" },
+      ]);
+      const keybindings = yield* Keybindings;
+      yield* keybindings.loadConfigState;
+
+      // Changed on disk without the cache hearing about it.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+l", command: "terminal.toggle" },
+      ]);
+      yield* keybindings
+        .editKeybindings([{ type: "remove", rule: { key: "mod+g", command: "terminal.toggle" } }])
+        .pipe(Effect.flip);
+
+      const served = (yield* keybindings.getSnapshot).keybindings.filter(
+        (rule) => rule.command === "terminal.toggle",
+      );
+      assert.deepEqual(
+        served.map((rule) => rule.shortcut.key),
+        ["l"],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("saves a recorded rule in the shape the next load gives it", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "cmd+k", command: "sidebar.search" },
+        { key: "ctrl+k", command: "sidebar.search", when: "!isMac" },
+      ]);
+      const keybindings = yield* Keybindings;
+
+      // Cmd+K recorded on macOS arrives as the old portable default, `mod+k`.
+      yield* keybindings.editKeybindings([
+        {
+          type: "set",
+          rule: { key: "mod+k", command: "sidebar.search" },
+          replacing: { key: "cmd+k", command: "sidebar.search" },
+        },
+      ]);
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), [
+        { key: "cmd+k", command: "sidebar.search" },
+        { key: "ctrl+k", command: "sidebar.search", when: "!isMac" },
+      ]);
+
+      // What was cached matches the file, so the next edit is not refused as stale.
+      yield* keybindings.editKeybindings([
+        { type: "remove", rule: { key: "cmd+k", command: "sidebar.search" } },
+      ]);
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), [
+        { key: "ctrl+k", command: "sidebar.search", when: "!isMac" },
+      ]);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it("refuses an edit naming a rule that does not compile as invalid, not stale", () => {
+    const rules = [{ key: "mod+j", command: "terminal.toggle" }] as const;
+    const result = applyKeybindingEdits(rules, [
+      { type: "remove", rule: { key: "mod+j+k", command: "terminal.toggle" } },
+    ]);
+
+    assert.equal(result._tag, "failure");
+    assert.equal(result._tag === "failure" ? result.reason : null, "invalid");
+  });
+
+  it.effect("edits the migrated rules the runtime shows", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      // The old sidebar search default, which the runtime shows as Cmd+K and Ctrl+K.
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+k", command: "sidebar.search" },
+      ]);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        return yield* keybindings.editKeybindings([
+          { type: "remove", rule: { key: "cmd+k", command: "sidebar.search" } },
+        ]);
+      });
+
+      assert.deepEqual(yield* readKeybindingsConfig(keybindingsConfigPath), [
+        { key: "ctrl+k", command: "sidebar.search", when: "!isMac" },
+      ]);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps entries it cannot read when saving", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const unreadable = [
+        { key: "mod+shift+d+o", command: "terminal.new" },
+        { key: "mod+x", command: "invalid.command", note: "hand edited" },
+      ];
+      yield* writeRawKeybindingsConfig(keybindingsConfigPath, [
+        unreadable[0],
+        { key: "mod+g", command: "terminal.toggle" },
+        unreadable[1],
+      ]);
+
+      const configState = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        yield* keybindings.editKeybindings([
+          { type: "set", rule: { key: "mod+h", command: "script.build.run" } },
+        ]);
+        return yield* keybindings.loadConfigState;
+      });
+
+      assert.deepEqual(yield* readRawKeybindingsConfig(keybindingsConfigPath), [
+        { key: "mod+g", command: "terminal.toggle" },
+        { key: "mod+h", command: "script.build.run" },
+        ...unreadable,
+      ]);
+      assert.deepEqual(
+        configState.issues.map((issue) => [issue.kind, "index" in issue ? issue.index : null]),
+        [
+          ["keybindings.invalid-entry", 2],
+          ["keybindings.invalid-entry", 3],
+        ],
+      );
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("refuses a write past the rule limit instead of dropping old rules", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const full = scriptRules(MAX_KEYBINDINGS_COUNT);
+      yield* writeRawKeybindingsConfig(keybindingsConfigPath, full);
+
+      const [upsertError, editError] = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        const upsert = yield* keybindings
+          .upsertKeybindingRule({ key: "mod+g", command: "script.extra.run" })
+          .pipe(Effect.flip);
+        const edit = yield* keybindings
+          .editKeybindings([{ type: "set", rule: { key: "mod+g", command: "terminal.toggle" } }])
+          .pipe(Effect.flip);
+        return [upsert, edit] as const;
+      });
+
+      assert.equal(upsertError.message, KEYBINDING_LIMIT_DETAIL);
+      assert.equal(editError.message, KEYBINDING_LIMIT_DETAIL);
+      assert.deepEqual(yield* readRawKeybindingsConfig(keybindingsConfigPath), full);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("still loads and shrinks a config already over the rule limit", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const overLimit = scriptRules(MAX_KEYBINDINGS_COUNT + 4);
+      yield* writeRawKeybindingsConfig(keybindingsConfigPath, overLimit);
+
+      const configState = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        const loaded = yield* keybindings.loadConfigState;
+        yield* keybindings.editKeybindings([{ type: "remove", rule: overLimit[0]! }]);
+        return loaded;
+      });
+
+      assert.deepEqual(configState.issues, []);
+      assert.equal(configState.keybindings.at(-1)?.command, overLimit.at(-1)?.command);
+      assert.deepEqual(
+        configState.keybindings
+          .filter((rule) => rule.command.startsWith("script."))
+          .map((rule) => rule.command),
+        overLimit.slice(-MAX_KEYBINDINGS_COUNT).map((rule) => rule.command),
+      );
+      yield* Schema.decodeUnknownEffect(ResolvedKeybindingsConfig)(configState.keybindings);
+      assert.deepEqual(yield* readRawKeybindingsConfig(keybindingsConfigPath), overLimit.slice(1));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("skips the startup backfill rather than trimming a full config", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const full = scriptRules(MAX_KEYBINDINGS_COUNT);
+      yield* writeRawKeybindingsConfig(keybindingsConfigPath, full);
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+        const snapshot = yield* keybindings.loadConfigState;
+        assert.isTrue(snapshot.keybindings.some((rule) => rule.command === "sidebar.toggle"));
+        assert.isTrue(snapshot.keybindings.some((rule) => rule.command === "chat.new"));
+        assert.deepEqual(
+          snapshot.keybindings.filter((rule) => !rule.command.startsWith("script.")),
+          compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS),
+        );
+        assert.isAtMost(snapshot.keybindings.length, MAX_RESOLVED_KEYBINDINGS_COUNT);
+        yield* Schema.decodeUnknownEffect(ResolvedKeybindingsConfig)(snapshot.keybindings);
+        assert.deepEqual(
+          snapshot.keybindings
+            .filter((rule) => rule.command.startsWith("script."))
+            .map((rule) => rule.command),
+          full.map((rule) => rule.command),
+        );
+        assert.equal(snapshot.keybindings.at(-1)?.command, full.at(-1)?.command);
+      });
+
+      assert.deepEqual(yield* readRawKeybindingsConfig(keybindingsConfigPath), full);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+  it.effect("keeps custom built-ins and unassigned markers at the user rule cap", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const full: KeybindingRule[] = [
+        { key: "unassigned", command: "sidebar.toggle" },
+        { key: "mod+shift+l", command: "browser.toggle", when: "!terminalFocus" },
+        ...scriptRules(MAX_KEYBINDINGS_COUNT - 2),
+      ];
+      yield* writeRawKeybindingsConfig(keybindingsConfigPath, full);
+      const keybindings = yield* Keybindings;
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const snapshot = yield* keybindings.loadConfigState;
+      assert.deepEqual(
+        snapshot.keybindings.filter(
+          (rule) => rule.command === "sidebar.toggle" || rule.command === "browser.toggle",
+        ),
+        compileResolvedKeybindingsConfig(full.slice(0, 2)),
+      );
+      yield* Schema.decodeUnknownEffect(ResolvedKeybindingsConfig)(snapshot.keybindings);
+      assert.deepEqual(yield* readRawKeybindingsConfig(keybindingsConfigPath), full);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 });

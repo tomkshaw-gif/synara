@@ -73,6 +73,7 @@ import {
   LoaderCircleIcon,
   RefreshCwIcon,
   TemporaryThreadIcon,
+  FolderIcon,
 } from "~/lib/icons";
 import { getLocalFolderBrowseRootPath } from "~/lib/localFolderMentions";
 import { findProviderStatus, resolveVoiceTranscriptionTarget } from "~/lib/providerAvailability";
@@ -80,11 +81,13 @@ import { resolveProviderInstanceLabel } from "~/lib/providerInstancePresentation
 import { resolveAuxiliaryTextGenerationSelection } from "~/lib/textGenerationCapabilities";
 import { cn, isMacNavigatorPlatform, newCommandId, newThreadId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
+import { dispatchThreadSnoozedUntil, resolveSnoozeDeadline } from "~/lib/threadSnooze";
 import {
   ChatLinkActionsContext,
   parseGitHubItemUrl,
   type ChatLinkActions,
 } from "~/lib/linkContextMenu";
+import { openExternalLink } from "~/lib/linkChips";
 import {
   mergeProjectInstructionsIntoThreadNotes,
   useProjectInstructionsStore,
@@ -267,7 +270,6 @@ import {
 } from "./ChatView.logic";
 import { createThreadLineageSelector, localSubagentThreadId } from "./ChatView.selectors";
 import { ComposerPromptEditor } from "./ComposerPromptEditor";
-import { FolderClosed } from "./FolderClosed";
 import PlanSidebar from "./PlanSidebar";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { RenameThreadDialog } from "./RenameThreadDialog";
@@ -316,6 +318,7 @@ import {
   shouldShowComputerControlEffortHint,
 } from "./chat/composerComputerControlHint";
 import { ComposerComputerControlEffortHint } from "./chat/ComposerComputerControlEffortHint";
+import { ComposerPullRequestAutoFixHint } from "./chat/ComposerPullRequestAutoFixHint";
 import { ComposerReferenceAttachments } from "./chat/ComposerReferenceAttachments";
 import { ComposerSlashStatusDialog } from "./chat/ComposerSlashStatusDialog";
 import { ComposerSubagentStrip } from "./chat/ComposerSubagentStrip";
@@ -2618,10 +2621,17 @@ export default function ChatView({
   // browser. A pull request opens in the thread's PR pane, an issue in the inbox detail.
   // Left to the React Compiler to memoize: manual hooks here cannot be preserved.
   const openRightDockPane = useRightDockStore((store) => store.openPane);
+  // A side chat in a dock (the only chat without a header) has no dock or browser panel of its
+  // own on screen, so the fallbacks above change for it. A forked one selects a PR tab in its host
+  // chat's dock, a standalone one (Code review's Ask) selects the PR in Code review, and links
+  // meant for the in-app browser open externally.
+  const sidechatHostThreadId = hideHeader ? (activeThread?.sidechatSourceThreadId ?? null) : null;
+  const opensPullRequestInCodeReview = hideHeader && standaloneSidechatContext !== null;
+  const openLinkInBrowser = hideHeader ? openExternalLink : openBrowserUrl;
   const openGitHubItemLink = (url: string) => {
     const item = parseGitHubItemUrl(url);
     if (!item || !activeProjectId) {
-      openBrowserUrl(url);
+      openLinkInBrowser(url);
       return;
     }
     const { kind, repository, number } = item;
@@ -2631,10 +2641,10 @@ export default function ChatView({
           (candidate) => candidate.nameWithOwner.toLowerCase() === repository.toLowerCase(),
         );
         if (!belongsToProject) {
-          openBrowserUrl(url);
+          openLinkInBrowser(url);
           return;
         }
-        if (kind === "issue") {
+        if (kind === "issue" || opensPullRequestInCodeReview) {
           void navigate({
             to: "/pull-requests",
             search: {
@@ -2646,7 +2656,7 @@ export default function ChatView({
           });
           return;
         }
-        openRightDockPane(threadId, {
+        openRightDockPane(sidechatHostThreadId ?? threadId, {
           kind: "pullRequest",
           pullRequestProjectId: activeProjectId,
           pullRequestRepository: repository,
@@ -2654,11 +2664,11 @@ export default function ChatView({
           pullRequestInitialTab: "summary",
         });
       },
-      () => openBrowserUrl(url),
+      () => openLinkInBrowser(url),
     );
   };
   const chatLinkActions: ChatLinkActions = {
-    openInBrowserPanel: openBrowserUrl,
+    openInBrowserPanel: openLinkInBrowser,
     openGitHubItem: openGitHubItemLink,
     githubLinkOpenTarget: settings.githubLinkOpenTarget,
   };
@@ -4319,17 +4329,18 @@ export default function ChatView({
     });
     return false;
   });
-  const prepareProviderHandoffForSend = useStableCallback(async (): Promise<void> => {
-    if (!activeThread || !providerHandoffPendingForSend) {
-      return;
-    }
-    await continueThreadHandoff(
-      activeThread,
-      selectedProvider,
-      selectedProviderInstanceId,
-      selectedModelSelection,
-    );
-  });
+  const prepareProviderHandoffForSend = useStableCallback(
+    async (threadForSend: Thread, selectionForSend: ModelSelection): Promise<void> => {
+      // A send owns the thread and model captured before attachment/setup waits.
+      // Later picker changes or navigation belong to the next send.
+      await continueThreadHandoff(
+        threadForSend,
+        selectionForSend.provider,
+        selectionForSend.instanceId,
+        selectionForSend,
+      );
+    },
+  );
 
   const { onSend } = useChatTurnSubmission({
     threadId,
@@ -5414,7 +5425,7 @@ export default function ChatView({
           COMPOSER_TOOLBAR_TRIGGER_TEXT_CLASS_NAME,
         )}
       >
-        <FolderClosed className="size-3.5 shrink-0" />
+        <FolderIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate">{activeProjectDisplayName}</span>
       </span>
     ) : null;
@@ -5853,6 +5864,22 @@ export default function ChatView({
                 }
               />
             ) : null}
+            <ComposerPullRequestAutoFixHint
+              threadId={threadId}
+              isServerThread={isServerThread}
+              pullRequest={gitStatusQuery.data?.pr ?? null}
+              isWorking={isWorking}
+              attachedToPrevious={
+                showComposerLiveChangesHeader ||
+                showComposerActiveTaskListCard ||
+                showComposerWorkflowRunCard ||
+                showComposerSubagentStrip ||
+                queuedComposerTurns.length > 0 ||
+                showComposerGoalHeader ||
+                showComposerComputerControlEffortHint ||
+                pendingBackgroundWorkCount > 0
+              }
+            />
             {settledThreadBranchMismatch ? (
               <div className="pb-2">
                 <ComposerBranchMismatchBanner {...settledThreadBranchMismatch} />
@@ -5956,6 +5983,19 @@ export default function ChatView({
                   pendingAutomationConversation &&
                   pendingAutomationConversation.threadId === threadId
                     ? { onCancel: cancelAutomationConversation }
+                    : null
+                }
+                snooze={
+                  serverThread?.snoozedUntil != null && serverThread.archivedAt == null
+                    ? {
+                        snoozedUntil: serverThread.snoozedUntil,
+                        onReturnNow: () => void dispatchThreadSnoozedUntil(serverThread.id, null),
+                        onReschedule: (duration) =>
+                          void dispatchThreadSnoozedUntil(
+                            serverThread.id,
+                            resolveSnoozeDeadline(duration, Date.now()).toISOString(),
+                          ),
+                      }
                     : null
                 }
               />
@@ -6254,6 +6294,7 @@ export default function ChatView({
                 threadTabs: (
                   <OpenThreadTabStrip
                     activeThreadId={activeThread.id}
+                    keybindings={keybindings}
                     onRenameActiveThread={() => setRenameDialogOpen(true)}
                   />
                 ),
@@ -6539,6 +6580,7 @@ export default function ChatView({
                     crossTaskOrigin={resolvedCrossTaskOrigin}
                     forkSource={forkSource}
                     isTemporaryThread={isThreadTemporary}
+                    isLocalDraft={isLocalDraftThread}
                     timelineEntries={timelineEntries}
                     messageChangeSignal={timelineMessages}
                     turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
@@ -6569,6 +6611,7 @@ export default function ChatView({
                     chatFontSizePx={settings.chatFontSizePx}
                     timestampFormat={timestampFormat}
                     messageTrailAudioSource={settings.messageTrailAudioSource}
+                    messageTrailMicrophoneId={settings.messageTrailMicrophoneId}
                     workspaceRoot={threadArtifactWorkspaceRoot ?? undefined}
                     keybindings={keybindings}
                     availableEditors={availableEditors}

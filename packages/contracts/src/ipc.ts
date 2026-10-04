@@ -176,6 +176,12 @@ import type {
   PullRequestSetPinnedResult,
 } from "./pullRequests";
 import type {
+  PullRequestAutoFixGetInput,
+  PullRequestAutoFixListResult,
+  PullRequestAutoFixResult,
+  PullRequestAutoFixSetInput,
+} from "./pullRequestAutoFix";
+import type {
   GitHubInboxListInput,
   GitHubInboxListResult,
   GitHubIssueCommentInput,
@@ -371,6 +377,7 @@ import type {
   StatsGetRecapResult,
 } from "./stats";
 import type { BrowserAnnotationMethods } from "./browserAnnotations";
+import { type KeybindingCommand, MAX_KEYBINDING_VALUE_LENGTH } from "./keybindings";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -783,6 +790,32 @@ export interface DesktopCustomTitleBarState {
 export const DesktopAppIcon = Schema.Literals(["default", "icon", "dark", "beta"]);
 export type DesktopAppIcon = typeof DesktopAppIcon.Type;
 
+/** Keybinding commands whose effective shortcut is mirrored onto a native application menu item. */
+export const DESKTOP_MENU_SHORTCUT_COMMANDS = [
+  "terminal.new",
+  "sidebar.toggle",
+  "browser.toggle",
+] as const satisfies ReadonlyArray<KeybindingCommand>;
+export type DesktopMenuShortcutCommand = (typeof DESKTOP_MENU_SHORTCUT_COMMANDS)[number];
+
+// Same fields as KeybindingShortcut, but `key` is not trimmed: the space key is " ".
+const DesktopMenuShortcut = Schema.Struct({
+  key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_KEYBINDING_VALUE_LENGTH)),
+  metaKey: Schema.Boolean,
+  ctrlKey: Schema.Boolean,
+  shiftKey: Schema.Boolean,
+  altKey: Schema.Boolean,
+  modKey: Schema.Boolean,
+});
+
+/** The user's shortcut for each menu command; null leaves that menu item without an accelerator. */
+export const DesktopMenuShortcuts = Schema.Struct({
+  "terminal.new": Schema.NullOr(DesktopMenuShortcut),
+  "sidebar.toggle": Schema.NullOr(DesktopMenuShortcut),
+  "browser.toggle": Schema.NullOr(DesktopMenuShortcut),
+});
+export type DesktopMenuShortcuts = typeof DesktopMenuShortcuts.Type;
+
 export interface SynaraStorageSnapshot {
   readonly version: 1;
   readonly exportedAt: string;
@@ -807,6 +840,14 @@ export interface DesktopComputerPreviewFrame {
 
 /** Sound the message trail follows: the Mac's audio output, the microphone, or both. */
 export type DesktopAudioLevelSource = "system" | "microphone" | "both";
+
+/** A Mac input device the message trail can listen to. `id` is the Core Audio UID. */
+export interface DesktopAudioInputDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly bluetooth: boolean;
+  readonly default: boolean;
+}
 
 /**
  * Whether the desktop is reading audio levels. "unsupported" means this host
@@ -915,13 +956,24 @@ export interface DesktopBridge {
    * Loudness of the Mac's audio output and/or the microphone, in 0..1, for the
    * message trail. Desktop on macOS only, in Stable and Beta; the main process
    * refuses it elsewhere. Levels stream only while this window has a source set
-   * (`null` stops), and silence arrives once as 0.
+   * (`null` stops), and silence arrives once as 0. `microphoneId` picks the
+   * input device by `DesktopAudioInputDevice.id`; omitted or `null` follows
+   * the Mac's default input.
    */
   audioLevel?: {
-    setSource: (source: DesktopAudioLevelSource | null) => Promise<DesktopAudioLevelStatus>;
+    setSource: (
+      source: DesktopAudioLevelSource | null,
+      microphoneId?: string | null,
+    ) => Promise<DesktopAudioLevelStatus>;
+    listMicrophones: () => Promise<readonly DesktopAudioInputDevice[]>;
     onLevel: (listener: (level: number) => void) => () => void;
   };
   onMenuAction: (listener: (action: string) => void) => () => void;
+  /**
+   * Mirrors the user's keybindings onto the native menu accelerators. Absent on
+   * builds that predate it; until a window reports, the menu keeps its defaults.
+   */
+  setMenuShortcuts?: (shortcuts: DesktopMenuShortcuts) => Promise<void>;
   onQuitConfirmationRequest: (
     listener: (request: DesktopQuitConfirmationRequest) => void,
   ) => () => void;
@@ -1141,6 +1193,8 @@ export interface NativeApi {
     action: (input: PullRequestActionInput) => Promise<PullRequestActionResult>;
     comment: (input: PullRequestCommentInput) => Promise<PullRequestActionResult>;
     setPinned: (input: PullRequestSetPinnedInput) => Promise<PullRequestSetPinnedResult>;
+    getAutoFix: (input: PullRequestAutoFixGetInput) => Promise<PullRequestAutoFixListResult>;
+    setAutoFix: (input: PullRequestAutoFixSetInput) => Promise<PullRequestAutoFixResult>;
   };
   contextMenu: {
     show: <T extends string>(

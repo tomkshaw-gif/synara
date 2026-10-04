@@ -36,6 +36,7 @@ import {
   PROVIDER_DELIVERY_BLOCK_SUMMARY,
 } from "@synara/shared/providerDeliveryBlock";
 import type { DeepPartial } from "@synara/shared/Struct";
+import { SIDECHAT_INACTIVITY_EXPIRY_MS } from "@synara/shared/sidechatExpiry";
 import {
   Duration,
   Deferred,
@@ -6800,7 +6801,7 @@ describe("ProviderCommandReactor", () => {
   it("does not replay or recover goal continuations for an expired side chat", async () => {
     const harness = await createHarness({ startReactor: false });
     const sidechatId = ThreadId.makeUnsafe("thread-expired-goal-sidechat");
-    const createdAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - SIDECHAT_INACTIVITY_EXPIRY_MS - 1_000).toISOString();
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -6853,7 +6854,7 @@ describe("ProviderCommandReactor", () => {
           sidechatBeforeExpiry?.sidechatLastActivityAt ??
           sidechatBeforeExpiry?.createdAt ??
           createdAt,
-        expiredAt: new Date(Date.parse(createdAt) + 3_600_000).toISOString(),
+        expiredAt: new Date().toISOString(),
       }),
     );
 
@@ -6870,7 +6871,7 @@ describe("ProviderCommandReactor", () => {
     const messageId = asMessageId("message-expired-turn-start-sidechat");
     const commandId = CommandId.makeUnsafe("cmd-persist-expired-turn-start-sidechat");
     const messageEventId = asEventId("evt-message-expired-turn-start-sidechat");
-    const createdAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - SIDECHAT_INACTIVITY_EXPIRY_MS - 1_000).toISOString();
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -6947,7 +6948,7 @@ describe("ProviderCommandReactor", () => {
           sidechatBeforeExpiry?.sidechatLastActivityAt ??
           sidechatBeforeExpiry?.createdAt ??
           createdAt,
-        expiredAt: new Date(Date.parse(createdAt) + 3_600_000).toISOString(),
+        expiredAt: new Date().toISOString(),
       }),
     );
 
@@ -14472,6 +14473,64 @@ describe("ProviderCommandReactor", () => {
       expect(harness.sendTurn.mock.calls[1]?.[0].modelSelection).toMatchObject({
         provider: "grok",
       });
+    });
+
+    it("settles a timed-out target start and keeps the thread usable", async () => {
+      const harness = await createHarness({
+        threadModelSelection: { provider: "grok", model: "grok-code-fast-1" },
+        commandEventTimeout: Duration.millis(300),
+      });
+      await runFirstGrokTurn(harness);
+      harness.startSession.mockImplementationOnce(() => Effect.never);
+
+      const handoff = await dispatchHandoff(harness);
+      await waitFor(async () => {
+        const cursor = await Effect.runPromise(
+          harness.deliveryRepository.getConsumerState("provider-command-reactor.v1"),
+        );
+        return (Option.getOrUndefined(cursor)?.lastAckedSequence ?? 0) >= handoff.sequence;
+      });
+      expect(
+        (await readHarnessThread(harness))?.activities.some(
+          (activity) => activity.kind === "provider.handoff.failed",
+        ),
+      ).toBe(true);
+      expect((await readHarnessThread(harness))?.modelSelection.provider).toBe("grok");
+      await sendSecondTurn(harness);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      expect(harness.sendTurn.mock.calls[1]?.[0].input).toContain("<thread_context>");
+      expect(harness.sendTurn.mock.calls[1]?.[0].input).toContain("first turn on grok");
+    });
+
+    it("keeps the source runtime while background tasks are still active", async () => {
+      const harness = await createHarness({
+        threadModelSelection: { provider: "grok", model: "grok-code-fast-1" },
+      });
+      await runFirstGrokTurn(harness);
+      harness.hasLiveRuntimeTasks.mockReturnValue(Effect.succeed(true));
+
+      await dispatchHandoff(harness);
+      await waitFor(async () =>
+        Boolean(
+          (await readHarnessThread(harness))?.activities.some(
+            (activity) =>
+              activity.kind === "provider.handoff.failed" || activity.kind === "provider.handoff",
+          ),
+        ),
+      );
+
+      const thread = await readHarnessThread(harness);
+      expect(
+        thread?.activities.find((activity) => activity.kind.startsWith("provider.handoff"))?.kind,
+      ).toBe("provider.handoff.failed");
+      expect(thread?.modelSelection).toMatchObject({ provider: "grok" });
+      expect(thread?.session?.providerName).toBe("grok");
+      expect(harness.clearSessionResumeCursor).not.toHaveBeenCalled();
+      expect(harness.stopSession).not.toHaveBeenCalled();
+      expect(harness.startSession.mock.calls).toHaveLength(1);
+      expect(
+        thread?.activities.find((activity) => activity.kind === "provider.handoff.failed"),
+      ).toMatchObject({ payload: { detail: expect.stringMatching(/background tasks/) } });
     });
 
     it("refuses a handoff while a turn is running", async () => {

@@ -23,6 +23,7 @@ import {
   GitHubInboxSort,
   TrimmedNonEmptyString,
   ProviderKind,
+  SidechatExpiry,
   type GitTextGenerationProvider,
   type ProviderStartOptions,
   type ServerSettingsView,
@@ -408,6 +409,8 @@ export const AppSettingsSchema = Schema.Struct({
   ).pipe(withDefaults(() => ["authored", "reviewRequested"] as const)),
   // Server-backed: the inbox also reads each project's other GitHub remotes (fork upstreams).
   githubInboxIncludeUpstreams: Schema.Boolean.pipe(withDefaults(() => false)),
+  // Server-backed: how long an idle side chat stays usable before it expires.
+  sidechatExpiry: SidechatExpiry.pipe(withDefaults(() => "1h" as const satisfies SidechatExpiry)),
   // Local-only UI preferences for hiding sidebar surfaces a user doesn't want.
   // `showChatsSection` controls the standalone "Chats" list in the sidebar footer
   // (rootless chats not tied to a project). `showGroupsSection` controls the
@@ -446,6 +449,14 @@ export const AppSettingsSchema = Schema.Struct({
     withDefaults((): ReadonlyArray<ProviderKind> => ["codex", "claudeAgent"]),
   ),
   railUsageWindow: RailUsageWindow.pipe(withDefaults(() => DEFAULT_RAIL_USAGE_WINDOW)),
+  // Usage popovers (rail rings, chat header, branch toolbar) open on the limit rows only;
+  // reset credits, credits, and token totals sit behind a "Details" toggle. The toggle
+  // writes back here, so the last choice sticks; Settings → Usage exposes it too.
+  usageDetailsDefaultOpen: Schema.Boolean.pipe(withDefaults(() => false)),
+  // Which detail sections usage popovers offer at all. Ignored when a provider reports no
+  // limit rows, since the details are then the only usage there is to show.
+  usagePopoverShowResetCredits: Schema.Boolean.pipe(withDefaults(() => true)),
+  usagePopoverShowUsageLines: Schema.Boolean.pipe(withDefaults(() => true)),
   showEnvironmentRepository: Schema.Boolean.pipe(withDefaults(() => true)),
   showEnvironmentPullRequest: Schema.Boolean.pipe(withDefaults(() => true)),
   showEnvironmentEditor: Schema.Boolean.pipe(withDefaults(() => true)),
@@ -465,6 +476,11 @@ export const AppSettingsSchema = Schema.Struct({
   // Desktop on macOS: the message trail moves with the Mac's audio output,
   // the microphone, or both. Opt-in because the first use asks macOS for access.
   messageTrailAudioSource: MessageTrailAudioSource.pipe(withDefaults(() => "off" as const)),
+  // Core Audio UID of the microphone the trail listens to; "" follows the Mac's
+  // default input (which may be a Bluetooth headset).
+  messageTrailMicrophoneId: Schema.String.check(Schema.isMaxLength(512)).pipe(
+    withDefaults(() => ""),
+  ),
   autoOpenDevicePane: Schema.Boolean.pipe(withDefaults(() => true)),
   enableProviderUpdateChecks: Schema.Boolean.pipe(withDefaults(() => true)),
   enableNativeFontSmoothing: Schema.Boolean.pipe(withDefaults(getDefaultNativeFontSmoothing)),
@@ -509,6 +525,9 @@ export const AppSettingsSchema = Schema.Struct({
   // One-shot composer hint that suggests Medium effort for faster desktop actions.
   // Set when the user applies or dismisses it, so the hint never asks twice.
   dismissedComputerControlEffortHint: Schema.Boolean.pipe(withDefaults(() => false)),
+  // One-shot composer hint offering Auto-fix CI (Beta) on a chat's open PR. Set when the
+  // user dismisses it or turns Auto-fix CI on anywhere, so it never asks twice.
+  dismissedPullRequestAutoFixHint: Schema.Boolean.pipe(withDefaults(() => false)),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     withDefaults(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
   ),
@@ -1498,6 +1517,7 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     devinBinaryPath: settings.providers.devin.binaryPath,
     defaultThreadEnvMode: settings.defaultThreadEnvMode,
     githubInboxIncludeUpstreams: settings.githubInboxIncludeUpstreams,
+    sidechatExpiry: settings.sidechatExpiry,
     enableAssistantStreaming: settings.enableAssistantStreaming,
     enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
     antigravityBinaryPath: settings.providers.antigravity.binaryPath,
@@ -1638,6 +1658,13 @@ export function appSettingsPatchToServerSettingsPatch(
   }
   if (hasOwn(patch, "githubInboxIncludeUpstreams")) {
     serverPatch.githubInboxIncludeUpstreams = Boolean(patch.githubInboxIncludeUpstreams);
+  }
+  if (
+    patch.sidechatExpiry === "1h" ||
+    patch.sidechatExpiry === "24h" ||
+    patch.sidechatExpiry === "never"
+  ) {
+    serverPatch.sidechatExpiry = patch.sidechatExpiry;
   }
   if (hasOwn(patch, "onboardingCompletedAt")) {
     serverPatch.onboardingCompletedAt = patch.onboardingCompletedAt ?? null;
