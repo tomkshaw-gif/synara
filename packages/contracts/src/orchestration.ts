@@ -48,6 +48,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getShellSnapshot: "orchestration.getShellSnapshot",
   getThreadDetailSnapshot: "orchestration.getThreadDetailSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
+  settleTurnDispatch: "orchestration.settleTurnDispatch",
   importThread: "orchestration.importThread",
   listProjectImports: "orchestration.listProjectImports",
   importProject: "orchestration.importProject",
@@ -567,7 +568,12 @@ export const MAX_PINNED_PROJECTS = 3;
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
 export const CHAT_ASSISTANT_SELECTION_TEXT_MAX_CHARS = 4_000;
 export const THREAD_NOTES_MAX_CHARS = 16_384;
-export const THREAD_GOAL_MAX_CHARS = 4_096;
+// Goals travel the same transport budget as turn input; anything longer than
+// THREAD_GOAL_INLINE_MAX_CHARS is materialized to an on-disk file server-side
+// and persisted as a "read this file" reference (Codex-style large-input
+// handling), so the cap exists only to bound the wire payload.
+export const THREAD_GOAL_MAX_CHARS = PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
+export const THREAD_GOAL_INLINE_MAX_CHARS = 1_000;
 export const PINNED_MESSAGES_MAX_COUNT = 100;
 export const PINNED_MESSAGE_LABEL_MAX_CHARS = 60;
 // Correlation id is command id by design in this model.
@@ -1029,6 +1035,8 @@ export const PendingClaudeCacheReview = Schema.Struct({
 export type PendingClaudeCacheReview = typeof PendingClaudeCacheReview.Type;
 
 export const OrchestrationThread = Schema.Struct({
+  /** Durable project-import provenance; ordinary chats never request imported history. */
+  isProjectImport: Schema.optional(Schema.Boolean),
   claudeCacheReview: Schema.optional(Schema.NullOr(PendingClaudeCacheReview)),
   id: ThreadId,
   projectId: ProjectId,
@@ -1129,6 +1137,8 @@ export const OrchestrationThread = Schema.Struct({
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
 export const OrchestrationThreadShell = Schema.Struct({
+  /** Durable project-import provenance; ordinary chats never request imported history. */
+  isProjectImport: Schema.optional(Schema.Boolean),
   claudeCacheReview: Schema.optional(Schema.NullOr(PendingClaudeCacheReview)),
   id: ThreadId,
   projectId: ProjectId,
@@ -2823,6 +2833,18 @@ export const DispatchResult = Schema.Struct({
 });
 export type DispatchResult = typeof DispatchResult.Type;
 
+// Resolves a lost turn-start acknowledgement without starting a new turn. If
+// the command was never accepted, the server durably rejects late arrivals.
+export const OrchestrationSettleTurnDispatchInput = Schema.Struct({
+  command: ClientThreadTurnStartCommand,
+});
+export const OrchestrationSettleTurnDispatchResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("accepted"), sequence: NonNegativeInt }),
+  Schema.Struct({ status: Schema.Literal("rejected"), message: Schema.String }),
+]);
+export type OrchestrationSettleTurnDispatchResult =
+  typeof OrchestrationSettleTurnDispatchResult.Type;
+
 export const OrchestrationGetSnapshotInput = Schema.Struct({});
 export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput.Type;
 const OrchestrationGetSnapshotResult = OrchestrationReadModel;
@@ -3033,6 +3055,10 @@ export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  settleTurnDispatch: {
+    input: OrchestrationSettleTurnDispatchInput,
+    output: OrchestrationSettleTurnDispatchResult,
   },
   importThread: {
     input: OrchestrationImportThreadInput,

@@ -29,7 +29,9 @@ is cancelled, the task and its prompt remain available for retry.
 - **Sidebar** — projects, spaces, tasks, and activity requiring attention. The rail
   is a fixed column of icon tabs for Home, Spaces, Kanban (Tasks in Beta), Code review, Automations, Hubs (Beta), and
   Settings, with the thread panel beside it and the route shown as a card inset from the window.
-  Open threads appear as tabs across the top of the chat.
+  Open saved threads appear as tabs across the top of the chat. Unsent drafts stay out of
+  the tab strip until they become saved threads on the first send. Saved tabs remain
+  available to return to while an unsent draft is on screen, including in the editor view.
   Archiving the open thread or marking it **Done** opens the most recently used unfinished chat
   across projects, ordered by its last human message (or creation time). If none remains, New
   thread reopens an unsent draft. Actions on other threads keep the current chat open.
@@ -43,11 +45,21 @@ is cancelled, the task and its prompt remain available for retry.
   without opening the chat, and show the agent's latest reply for review before you mark it done. A
   List / Kanban switch in the header opens the Kanban board instead, and the Tasks entry remembers
   the view you picked.
+- **Kanban** — the Attention view groups chat cards into Draft, In Progress, Awaiting you,
+  and Done; Classic keeps the three-column layout. Approval/input requests, failures, and
+  stalled work surface in Awaiting you. Needs review requires a live-confirmed open PR in a
+  dedicated worktree. Drafts can be sent as persistent goals. Kanban and Tasks reuse the
+  same draft dispatcher, preserving provider-instance selection and edits made while sending.
+  The `synara_*_kanban_*` gateway tools read and drive durable cards within the caller's
+  ordinary project; local composer drafts remain client-only. Gateway draft creation uses
+  the local checkout; isolated worktree callers can create a task instead. These tools do
+  not change the Beta-only Tasks to-do records.
 - **Inbox** (Beta) — today’s due and overdue to-dos, tasks with an agent, and tasks finished
   since the working day began at 4am, beside the day’s agent recap. Add a task here to make it due
   on today’s calendar date, or select it to edit and delegate through the same card as Tasks.
   **All tasks** opens the complete backlog.
-- **Conversation** — user messages, agent responses, plans, tools, approvals, and subagent activity
+- **Conversation** — user messages, agent responses, plans, tools, approvals, and subagent activity.
+  In a split view, dragging the divider resizes both chats continuously; releasing it saves the layout.
 - **Composer** — objectives, attachments, provider selection, model selection, and task controls
 - **Terminal** — a real shell opened in the task's working directory
 - **Browser** — a shared live page surface for previews, semantic automation, and page-declared
@@ -92,6 +104,15 @@ A turn is one cycle inside that task:
 
 A long task can contain many turns. Keep follow-ups connected to the same objective; create another
 task when the work needs a different owner, branch, or review boundary.
+
+If a connection drops while sending, Synara shows **Checking message delivery…** while it checks the original
+command's durable receipt. An accepted message is retained without resending it to the provider.
+If it was not accepted, Synara records a rejection that also blocks a delayed copy, then restores
+the draft for retry. This recovery requires a server advertising `orchestration.turn-dispatch-settlement`;
+older servers retain their existing error handling. If recovery reaches a server without that capability,
+Synara reports that delivery is still unknown; reconnect to an updated server and check the conversation
+before sending again. Socket recovery restores active subscriptions
+and reports the connection as open only after the feature socket answers.
 
 Turn off **Settings → General → Move sent messages to top** to keep new messages at the bottom
 of the conversation and follow replies as they stream.
@@ -316,6 +337,12 @@ scaling beyond one task.
 - `mod+\` — split the current view
 - `mod+1` through `mod+9` — open a numbered sidebar thread. Hold `mod` to show the
   default numbers in the classic and Activity views.
+
+Every split chat has an **X** in its header to close it. Closing an ordinary pane keeps
+the remaining chats and preserves focus on a surviving chat. Closing a forked Side
+returns to its source; a standalone Side in a non-source pane returns to the split’s
+source. Split headers keep the diff panel toggle without showing change totals,
+and omit expand and replace controls.
 
 Check the [keyboard reference](https://www.trysynara.com/docs/reference/keyboard-shortcuts) for the
 complete current list.
